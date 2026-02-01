@@ -111,9 +111,3 @@ MIT License - Feel free to modify and redistribute.
 ### 1.0.0
 - **Fixes X button deletion bug** - The X button no longer deletes your selected item in vanilla Android Stardew Valley. Input is intercepted before the game sees it.
 - All features tested and working on AYN Odin
-
-### 0.3.x (Beta)
-- Shop purchase fix (A button)
-- Inventory and chest sorting (X button)
-- Add to existing stacks in chests (Y button)
-- Generic Mod Config Menu support
