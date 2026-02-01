@@ -1,8 +1,8 @@
 {
-    "Name": "Android Controller Fix",
+    "Name": "Android Consolizer",
     "Author": "sonofskywalker3",
-    "Version": "1.0.0",
-    "Description": "Fixes broken controller support on Android - enables shop purchasing, chest management, and other actions that require touchscreen.",
+    "Version": "2.0.0",
+    "Description": "Brings console-style controller support to Android - 12-slot toolbar with row switching, shop purchasing, chest management, and inventory sorting.",
     "UniqueID": "sonofskywalker3.AndroidControllerFix",
     "EntryDll": "AndroidControllerFix.dll",
     "MinimumApiVersion": "4.0.0",

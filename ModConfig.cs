@@ -12,6 +12,12 @@ namespace AndroidControllerFix
         public bool EnableShopPurchaseFix { get; set; } = true;
 
         /*********
+        ** Toolbar Settings
+        *********/
+        /// <summary>Whether to enable toolbar navigation fix (LB/RB switch rows, LT/RT move within row).</summary>
+        public bool EnableToolbarNavFix { get; set; } = true;
+
+        /*********
         ** Inventory & Chest Settings
         *********/
         /// <summary>Whether to enable X button sorting (inventory and chest).</summary>
