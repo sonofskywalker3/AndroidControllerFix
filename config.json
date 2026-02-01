@@ -1,0 +1,6 @@
+{
+  "EnableShopPurchaseFix": true,
+  "EnableSortFix": true,
+  "EnableAddToStacksFix": true,
+  "VerboseLogging": false
+}

@@ -1,0 +1,16 @@
+{
+    "Name": "Android Controller Fix",
+    "Author": "sonofskywalker3",
+    "Version": "1.0.0",
+    "Description": "Fixes broken controller support on Android - enables shop purchasing, chest management, and other actions that require touchscreen.",
+    "UniqueID": "sonofskywalker3.AndroidControllerFix",
+    "EntryDll": "AndroidControllerFix.dll",
+    "MinimumApiVersion": "4.0.0",
+    "UpdateKeys": [],
+    "Dependencies": [
+        {
+            "UniqueID": "spacechase0.GenericModConfigMenu",
+            "IsRequired": false
+        }
+    ]
+}
