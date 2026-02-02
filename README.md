@@ -2,7 +2,7 @@
 
 A SMAPI mod that brings console-style controller support to Android Stardew Valley. Play with a controller like you would on Nintendo Switch - 12-slot toolbar rows, proper shop purchasing, chest management, and more.
 
-## Current Version: 2.5.0
+## Current Version: 2.5.1
 
 ## Features
 
@@ -179,9 +179,14 @@ MIT License - Feel free to modify and redistribute.
 
 ## Changelog
 
+### 2.5.1
+- **Fixed shop stock bug** - Limited stock items now properly decrement when purchasing partial quantities
+
 ### 2.5.0
 - **Fixed X button inventory deletion bug** - Critical fix for Xbox layout + Switch style combination
-- The physical X button is now properly blocked in inventory screens regardless of button remapping
+- Renamed "Use D-Pad for Toolbar" to "Use Bumpers Instead of Triggers"
+- Added LB/RB shop quantity adjustment when bumper mode is enabled
+- Added "Start Opens Journal" feature
 - Fully tested with Odin built-in controls and external Xbox Wireless controllers via Bluetooth
 
 ### 2.4.0

@@ -204,7 +204,20 @@ namespace AndroidConsolizer.Patches
                     if (remaining <= 0)
                     {
                         __instance.forSale.Remove(selectedItem);
+                        __instance.itemPriceAndStock.Remove(selectedItem);
                         Monitor.Log("Removed depleted item from shop", LogLevel.Debug);
+                    }
+                    else
+                    {
+                        // Update the stock count in itemPriceAndStock
+                        var newStockInfo = new ItemStockInformation(
+                            priceAndStock.Price,
+                            remaining,
+                            priceAndStock.TradeItem,
+                            priceAndStock.TradeItemCount
+                        );
+                        __instance.itemPriceAndStock[selectedItem] = newStockInfo;
+                        Monitor.Log($"Updated stock: {stock} -> {remaining}", LogLevel.Debug);
                     }
                 }
 
