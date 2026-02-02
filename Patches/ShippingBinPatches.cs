@@ -57,6 +57,9 @@ namespace AndroidConsolizer.Patches
                 if (!ModEntry.Config.EnableShippingBinFix)
                     return true;
 
+                // Remap button based on configured button style
+                Buttons remapped = ButtonRemapper.Remap(b);
+
                 // Log all components once to understand menu structure
                 if (!hasLoggedComponents && ModEntry.Config.VerboseLogging)
                 {
@@ -83,8 +86,8 @@ namespace AndroidConsolizer.Patches
                 if (slotId < 0 || slotId >= Game1.player.Items.Count)
                     return true;
 
-                // A button = ship entire stack
-                if (b == Buttons.A)
+                // A button (after remapping) = ship entire stack
+                if (remapped == Buttons.A)
                 {
                     Item item = Game1.player.Items[slotId];
                     if (item == null)
@@ -97,8 +100,8 @@ namespace AndroidConsolizer.Patches
                     return true;
                 }
 
-                // Y button = ship one item
-                if (b == Buttons.Y)
+                // Y button (after remapping) = ship one item
+                if (remapped == Buttons.Y)
                 {
                     Item item = Game1.player.Items[slotId];
                     if (item == null)

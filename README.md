@@ -2,15 +2,29 @@
 
 A SMAPI mod that brings console-style controller support to Android Stardew Valley. Play with a controller like you would on Nintendo Switch - 12-slot toolbar rows, proper shop purchasing, chest management, and more.
 
-## Current Version: 2.1.0
+## Current Version: 2.4.0
 
 ## Features
+
+### Controller Layout Support
+- **Switch/Odin**: A=right, B=bottom, X=top, Y=left
+- **Xbox**: A=bottom, B=right, X=left, Y=top
+- **PlayStation**: Cross=A, Circle=B, Square=X, Triangle=Y
+
+### Control Style Options
+- **Switch style**: Right button confirms, bottom button cancels
+- **Xbox/PS style**: Bottom button confirms, right button cancels
 
 ### Toolbar Navigation (Console-Style)
 - **12-slot toolbar rows** instead of Android's chaotic scrolling toolbar
 - **LB/RB**: Switch between toolbar rows (up to 3 rows with full backpack)
 - **LT/RT**: Move left/right within the current row
 - Visual toolbar matches console layout
+
+### D-Pad Toolbar Mode (For Controllers with Trigger Issues)
+- **D-Pad Up/Down**: Switch between toolbar rows
+- **LB/RB/D-Pad Left/Right**: Move left/right within the current row
+- Enable this if your controller's triggers aren't detected (see Known Issues)
 
 ### Shop Fixes
 - **A button**: Purchase items from any shop
@@ -54,11 +68,24 @@ A SMAPI mod that brings console-style controller support to Android Stardew Vall
 **Optional:**
 - [Generic Mod Config Menu](https://www.nexusmods.com/stardewvalley/mods/5098) - for in-game settings
 
-## Tested Devices
+## Tested Controllers
 
-- **AYN Odin** (Android gaming handheld)
+| Controller | Device | Status | Notes |
+|------------|--------|--------|-------|
+| **Built-in (Odin)** | AYN Odin Pro | Fully Working | All buttons and triggers work |
+| **Xbox Wireless** | AYN Odin Pro | Partial | **Triggers (LT/RT) not detected** - use D-Pad mode |
 
-If you test on other devices, please report your results!
+### Known Issues: Xbox Controller on Android
+
+Xbox Wireless Controllers connected via Bluetooth have a known issue on Android where the analog triggers (LT/RT) are not detected by Stardew Valley. This is due to Xbox controllers reporting triggers on different axes (`AXIS_GAS`/`AXIS_BRAKE`) than what the game's framework expects (`AXIS_LTRIGGER`/`AXIS_RTRIGGER`).
+
+**Workaround:** Enable "Use D-Pad for Toolbar (If triggers can't be detected)" in the mod settings. This remaps toolbar navigation to:
+- D-Pad Up/Down for switching rows
+- LB/RB/D-Pad Left/Right for switching tools
+
+All other Xbox controller buttons (A/B/X/Y, bumpers, thumbsticks, D-Pad) work correctly.
+
+If you test with other controllers, please report your results!
 
 ## Installation
 
@@ -72,8 +99,11 @@ Edit `config.json` or use Generic Mod Config Menu in-game:
 
 ```json
 {
+  "ControllerLayout": "Switch",
+  "ControlStyle": "Switch",
   "EnableShopPurchaseFix": true,
   "EnableToolbarNavFix": true,
+  "UseDpadForToolbarNav": false,
   "EnableSortFix": true,
   "EnableAddToStacksFix": true,
   "EnableShippingBinFix": true,
@@ -83,8 +113,11 @@ Edit `config.json` or use Generic Mod Config Menu in-game:
 
 | Option | Description |
 |--------|-------------|
+| `ControllerLayout` | Physical button layout: `Switch`, `Xbox`, or `PlayStation` |
+| `ControlStyle` | Control scheme: `Switch` (right=confirm) or `Xbox` (bottom=confirm) |
 | `EnableShopPurchaseFix` | A button purchases in shops |
 | `EnableToolbarNavFix` | Console-style toolbar with LB/RB/LT/RT |
+| `UseDpadForToolbarNav` | Use D-Pad for toolbar (if triggers don't work) |
 | `EnableSortFix` | X button sorts inventory/chests |
 | `EnableAddToStacksFix` | Y button adds to stacks in chests |
 | `EnableShippingBinFix` | A button stacks items in shipping bin |
@@ -118,6 +151,10 @@ Output: `bin/Release/net6.0/AndroidConsolizer X.X.X.zip`
 - Make sure `EnableToolbarNavFix` is `true` in config
 - The feature only works during gameplay (not in menus)
 
+### Triggers not working (Xbox controller)
+- This is a known Android limitation with Xbox Bluetooth controllers
+- Enable "Use D-Pad for Toolbar" in the mod settings as a workaround
+
 ## Compatibility
 
 - **Stardew Valley Expanded**: Compatible
@@ -140,6 +177,12 @@ Android Stardew Valley has broken controller support that makes it nearly unplay
 MIT License - Feel free to modify and redistribute.
 
 ## Changelog
+
+### 2.4.0
+- **Xbox controller support** - Tested with Xbox Wireless Controller
+- **D-Pad toolbar mode** - Alternative navigation for controllers with trigger detection issues
+- **Controller layout settings** - Support for Switch, Xbox, and PlayStation button layouts
+- **Control style settings** - Choose between Switch-style or Xbox-style confirm/cancel
 
 ### 2.1.0
 - **Console-style shipping bin** - Complete rewrite using game's native shipping flow

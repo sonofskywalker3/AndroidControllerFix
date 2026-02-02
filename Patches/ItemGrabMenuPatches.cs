@@ -46,21 +46,24 @@ namespace AndroidConsolizer.Patches
                 if (__instance.shippingBin)
                     return true;
 
-                // Log all button presses in chest menu for debugging
-                Monitor.Log($"ItemGrabMenu button: {b}", LogLevel.Debug);
+                // Remap button based on configured button style
+                Buttons remapped = ButtonRemapper.Remap(b);
 
-                // X button = Sort chest (and block the original to prevent deletion)
-                if (b == Buttons.X && ModEntry.Config.EnableSortFix)
+                // Log all button presses in chest menu for debugging
+                Monitor.Log($"ItemGrabMenu button: {b} (remapped={remapped})", LogLevel.Debug);
+
+                // X button (after remapping) = Sort chest (and block the original to prevent deletion)
+                if (remapped == Buttons.X && ModEntry.Config.EnableSortFix)
                 {
-                    Monitor.Log("X button pressed - sorting chest (blocking original)", LogLevel.Debug);
+                    Monitor.Log($"{b} remapped to X - sorting chest (blocking original)", LogLevel.Debug);
                     OrganizeChest(__instance);
                     return false; // Block original method to prevent item deletion
                 }
 
-                // Y button = Add to existing stacks
-                if (b == Buttons.Y && ModEntry.Config.EnableAddToStacksFix)
+                // Y button (after remapping) = Add to existing stacks
+                if (remapped == Buttons.Y && ModEntry.Config.EnableAddToStacksFix)
                 {
-                    Monitor.Log("Y button pressed - adding to stacks (blocking original)", LogLevel.Debug);
+                    Monitor.Log($"{b} remapped to Y - adding to stacks (blocking original)", LogLevel.Debug);
                     AddToExistingStacks(__instance);
                     return false; // Block original method
                 }

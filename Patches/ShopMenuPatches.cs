@@ -47,11 +47,14 @@ namespace AndroidConsolizer.Patches
         {
             try
             {
-                // Always log button presses to confirm patch is working
-                Monitor.Log($"ShopMenu postfix: button={b}", LogLevel.Debug);
+                // Remap button based on configured button style
+                Buttons remapped = ButtonRemapper.Remap(b);
 
-                // Only handle A button (confirm/purchase)
-                if (b != Buttons.A)
+                // Always log button presses to confirm patch is working
+                Monitor.Log($"ShopMenu postfix: button={b} (remapped={remapped})", LogLevel.Debug);
+
+                // Only handle A button (confirm/purchase) after remapping
+                if (remapped != Buttons.A)
                     return;
 
                 Monitor.Log("A button in shop - attempting purchase fix", LogLevel.Info);

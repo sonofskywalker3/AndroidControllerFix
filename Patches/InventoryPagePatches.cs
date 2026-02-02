@@ -52,12 +52,15 @@ namespace AndroidConsolizer.Patches
                 if (__instance.currentTab != GameMenu.inventoryTab)
                     return true; // Let original method run for other tabs
 
-                Monitor.Log($"GameMenu (inventory) button: {b}", LogLevel.Debug);
+                // Remap button based on configured button style
+                Buttons remapped = ButtonRemapper.Remap(b);
 
-                // X button = Sort inventory (and block the original to prevent deletion)
-                if (b == Buttons.X && ModEntry.Config.EnableSortFix)
+                Monitor.Log($"GameMenu (inventory) button: {b} (remapped={remapped})", LogLevel.Debug);
+
+                // X button (after remapping) = Sort inventory (and block the original to prevent deletion)
+                if (remapped == Buttons.X && ModEntry.Config.EnableSortFix)
                 {
-                    Monitor.Log("X button pressed in GameMenu inventory - sorting (blocking original)", LogLevel.Debug);
+                    Monitor.Log($"{b} remapped to X in GameMenu inventory - sorting (blocking original)", LogLevel.Debug);
                     SortPlayerInventory();
                     return false; // Block original method to prevent item deletion
                 }
@@ -77,12 +80,15 @@ namespace AndroidConsolizer.Patches
         {
             try
             {
-                Monitor.Log($"InventoryPage button: {b}", LogLevel.Debug);
+                // Remap button based on configured button style
+                Buttons remapped = ButtonRemapper.Remap(b);
 
-                // Block X button entirely on InventoryPage - this is where deletion happens on Android
-                if (b == Buttons.X)
+                Monitor.Log($"InventoryPage button: {b} (remapped={remapped})", LogLevel.Debug);
+
+                // Block X button (after remapping) entirely on InventoryPage - this is where deletion happens on Android
+                if (remapped == Buttons.X)
                 {
-                    Monitor.Log("X button pressed in InventoryPage - BLOCKING to prevent deletion", LogLevel.Debug);
+                    Monitor.Log($"{b} remapped to X in InventoryPage - BLOCKING to prevent deletion", LogLevel.Debug);
                     return false; // Block original method to prevent item deletion
                 }
             }
