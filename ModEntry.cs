@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Reflection;
 using HarmonyLib;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
@@ -158,7 +159,7 @@ namespace AndroidConsolizer
         private void HandleTriggersDirectly(Farmer player, int rowStart)
         {
             // Skip if using D-pad for toolbar navigation
-            if (Config.UseDpadForToolbarNav)
+            if (Config.UseBumpersInsteadOfTriggers)
                 return;
 
             GamePadState gpState = GamePad.GetState(PlayerIndex.One);
@@ -219,19 +220,45 @@ namespace AndroidConsolizer
             // With button remapping, check if any pressed button remaps to X (the sort action)
             if (Config.EnableSortFix)
             {
-                foreach (var button in e.Pressed)
+                // Check if we're in the inventory menu
+                if (Game1.activeClickableMenu is GameMenu gameMenu && gameMenu.currentTab == GameMenu.inventoryTab)
                 {
-                    if (ButtonRemapper.Remap(button) == SButton.ControllerX)
+                    foreach (var button in e.Pressed)
                     {
-                        // Check if we're in the inventory menu
-                        if (Game1.activeClickableMenu is GameMenu gameMenu && gameMenu.currentTab == GameMenu.inventoryTab)
+                        // CRITICAL: Always suppress raw ControllerX in inventory to prevent Android deletion bug
+                        // The game's Android code uses raw X for deletion, regardless of our remapping
+                        if (button == SButton.ControllerX)
                         {
-                            this.Monitor.Log($"Intercepting {button} (remapped to X) in inventory - suppressing and sorting", LogLevel.Debug);
+                            this.Monitor.Log($"Suppressing raw X button in inventory to prevent deletion", LogLevel.Debug);
+                            this.Helper.Input.Suppress(button);
+                        }
+
+                        // Trigger sort when remapped button is X (e.g., physical Y on Xbox layout)
+                        if (ButtonRemapper.Remap(button) == SButton.ControllerX)
+                        {
+                            this.Monitor.Log($"Intercepting {button} (remapped to X) in inventory - sorting", LogLevel.Debug);
                             this.Helper.Input.Suppress(button);
                             Patches.InventoryPagePatches.SortPlayerInventory();
                         }
-                        break;
                     }
+                }
+            }
+
+            // Shop quantity adjustment with bumpers (when triggers don't work)
+            if (Config.UseBumpersInsteadOfTriggers && Game1.activeClickableMenu is ShopMenu shopMenu)
+            {
+                HandleShopBumperQuantity(e, shopMenu);
+            }
+
+            // Journal button - Start opens Quest Log during gameplay
+            if (Config.EnableJournalButton && Game1.activeClickableMenu == null && Context.IsPlayerFree)
+            {
+                if (e.Pressed.Contains(SButton.ControllerStart))
+                {
+                    this.Helper.Input.Suppress(SButton.ControllerStart);
+                    OpenQuestLog();
+                    if (Config.VerboseLogging)
+                        this.Monitor.Log("Start button: Opening Quest Log", LogLevel.Debug);
                 }
             }
 
@@ -239,6 +266,119 @@ namespace AndroidConsolizer
             if (Config.EnableToolbarNavFix && Game1.activeClickableMenu == null && Context.IsPlayerFree)
             {
                 HandleToolbarNavigation(e);
+            }
+        }
+
+        /// <summary>Opens the Quest Log menu, handling Android's different constructor signature.</summary>
+        private void OpenQuestLog()
+        {
+            try
+            {
+                // Android QuestLog requires an int parameter (page index), PC version has parameterless constructor
+                // Use reflection to handle both cases
+                var questLogType = typeof(QuestLog);
+                var ctorWithInt = questLogType.GetConstructor(new[] { typeof(int) });
+
+                if (ctorWithInt != null)
+                {
+                    Game1.activeClickableMenu = (IClickableMenu)ctorWithInt.Invoke(new object[] { 0 });
+                }
+                else
+                {
+                    Game1.activeClickableMenu = (IClickableMenu)Activator.CreateInstance(questLogType);
+                }
+            }
+            catch (Exception ex)
+            {
+                this.Monitor.Log($"Failed to open Quest Log: {ex.Message}", LogLevel.Error);
+            }
+        }
+
+        /// <summary>Handle shop quantity adjustment with bumpers when triggers aren't available.</summary>
+        private void HandleShopBumperQuantity(ButtonsChangedEventArgs e, ShopMenu shopMenu)
+        {
+            try
+            {
+                // Get the quantityToBuy field via reflection
+                var quantityField = HarmonyLib.AccessTools.Field(typeof(ShopMenu), "quantityToBuy");
+                if (quantityField == null)
+                {
+                    this.Monitor.Log("Could not find quantityToBuy field", LogLevel.Warn);
+                    return;
+                }
+
+                int currentQuantity = (int)quantityField.GetValue(shopMenu);
+
+                // LB - Decrease quantity
+                if (e.Pressed.Contains(SButton.LeftShoulder))
+                {
+                    this.Helper.Input.Suppress(SButton.LeftShoulder);
+                    int newQuantity = Math.Max(1, currentQuantity - 1);
+                    quantityField.SetValue(shopMenu, newQuantity);
+                    if (newQuantity != currentQuantity)
+                        Game1.playSound("smallSelect");
+                    if (Config.VerboseLogging)
+                        this.Monitor.Log($"Shop quantity: {currentQuantity} -> {newQuantity}", LogLevel.Debug);
+                }
+
+                // RB - Increase quantity
+                if (e.Pressed.Contains(SButton.RightShoulder))
+                {
+                    this.Helper.Input.Suppress(SButton.RightShoulder);
+                    // Get max quantity based on selected item's stock and player's money
+                    int maxQuantity = GetShopMaxQuantity(shopMenu);
+                    int newQuantity = Math.Min(maxQuantity, currentQuantity + 1);
+                    quantityField.SetValue(shopMenu, newQuantity);
+                    if (newQuantity != currentQuantity)
+                        Game1.playSound("smallSelect");
+                    if (Config.VerboseLogging)
+                        this.Monitor.Log($"Shop quantity: {currentQuantity} -> {newQuantity} (max: {maxQuantity})", LogLevel.Debug);
+                }
+            }
+            catch (Exception ex)
+            {
+                this.Monitor.Log($"Error in shop bumper quantity: {ex.Message}", LogLevel.Error);
+            }
+        }
+
+        /// <summary>Get the maximum quantity that can be purchased for the currently selected shop item.</summary>
+        private int GetShopMaxQuantity(ShopMenu shopMenu)
+        {
+            try
+            {
+                // Find the currently selected item
+                ISalable selectedItem = null;
+                var snapped = shopMenu.currentlySnappedComponent;
+
+                if (snapped != null && shopMenu.forSaleButtons != null)
+                {
+                    int btnIndex = shopMenu.forSaleButtons.FindIndex(btn => btn.myID == snapped.myID);
+                    if (btnIndex >= 0)
+                    {
+                        int itemIndex = shopMenu.currentItemIndex + btnIndex;
+                        if (itemIndex >= 0 && itemIndex < shopMenu.forSale.Count)
+                        {
+                            selectedItem = shopMenu.forSale[itemIndex];
+                        }
+                    }
+                }
+
+                if (selectedItem == null || !shopMenu.itemPriceAndStock.TryGetValue(selectedItem, out var priceAndStock))
+                    return 999; // Default max if we can't determine
+
+                int unitPrice = priceAndStock.Price;
+                int stock = priceAndStock.Stock;
+                int playerMoney = ShopMenu.getPlayerCurrencyAmount(Game1.player, shopMenu.currency);
+
+                // Max is limited by stock and what player can afford
+                int maxByMoney = unitPrice > 0 ? playerMoney / unitPrice : 999;
+                int maxByStock = stock == int.MaxValue ? 999 : stock;
+
+                return Math.Max(1, Math.Min(maxByMoney, maxByStock));
+            }
+            catch
+            {
+                return 999; // Default max on error
             }
         }
 
@@ -252,7 +392,7 @@ namespace AndroidConsolizer
             if (Config.VerboseLogging && (e.Pressed.Contains(SButton.DPadUp) || e.Pressed.Contains(SButton.DPadDown) ||
                 e.Pressed.Contains(SButton.DPadLeft) || e.Pressed.Contains(SButton.DPadRight)))
             {
-                this.Monitor.Log($"D-Pad pressed. UseDpadForToolbarNav = {Config.UseDpadForToolbarNav}", LogLevel.Debug);
+                this.Monitor.Log($"D-Pad pressed. UseBumpersInsteadOfTriggers = {Config.UseBumpersInsteadOfTriggers}", LogLevel.Debug);
             }
 
             int currentIndex = player.CurrentToolIndex;
@@ -262,7 +402,7 @@ namespace AndroidConsolizer
             int positionInRow = currentIndex % 12;
 
             // Check if using D-pad for toolbar navigation
-            if (Config.UseDpadForToolbarNav)
+            if (Config.UseBumpersInsteadOfTriggers)
             {
                 // D-pad Up - Previous row
                 if (e.Pressed.Contains(SButton.DPadUp))
@@ -448,7 +588,7 @@ namespace AndroidConsolizer
 
             // Toolbar controls depend on D-pad mode
             string toolbarControls;
-            if (Config?.UseDpadForToolbarNav == true)
+            if (Config?.UseBumpersInsteadOfTriggers == true)
             {
                 toolbarControls = "--- TOOLBAR (D-Pad Mode) ---\n" +
                                   "D-Pad Up/Down - Switch Rows\n" +
@@ -461,12 +601,16 @@ namespace AndroidConsolizer
                                   "LT/RT - Move Left/Right";
             }
 
+            // Start button function
+            string startGameplay = Config?.EnableJournalButton == true ? "Open Journal" : "Open Inventory";
+
             // Format with consistent ABXY order for both sections
             return $"--- GAMEPLAY ---\n" +
                    $"{aLabel} - {aGameplay}\n" +
                    $"{bLabel} - {bGameplay}\n" +
                    $"{xLabel} - {xGameplay}\n" +
-                   $"{yLabel} - {yGameplay}\n\n" +
+                   $"{yLabel} - {yGameplay}\n" +
+                   $"Start - {startGameplay}\n\n" +
                    $"--- MENUS ---\n" +
                    $"{aLabel} - {aMenu}\n" +
                    $"{bLabel} - {bMenu}\n" +
@@ -587,12 +731,26 @@ namespace AndroidConsolizer
 
             configMenu.AddBoolOption(
                 mod: this.ModManifest,
-                name: () => "Use D-Pad for Toolbar (If triggers can't be detected)",
-                tooltip: () => "For controllers where Stardew Valley can't read the triggers (e.g., Xbox on Android).\n" +
-                              "D-Pad Up/Down switches rows, LB/RB/D-Pad Left/Right switches tools.\n" +
-                              "D-Pad still works normally in menus.",
-                getValue: () => Config.UseDpadForToolbarNav,
-                setValue: value => Config.UseDpadForToolbarNav = value
+                name: () => "Use Bumpers Instead of Triggers",
+                tooltip: () => "For controllers where triggers aren't detected (e.g., Xbox via Bluetooth).\n" +
+                              "Toolbar: D-Pad Up/Down switches rows, LB/RB moves within row.\n" +
+                              "Shops: LB/RB adjusts purchase quantity.",
+                getValue: () => Config.UseBumpersInsteadOfTriggers,
+                setValue: value => Config.UseBumpersInsteadOfTriggers = value
+            );
+
+            // Gameplay Shortcuts
+            configMenu.AddSectionTitle(
+                mod: this.ModManifest,
+                text: () => "Gameplay Shortcuts"
+            );
+
+            configMenu.AddBoolOption(
+                mod: this.ModManifest,
+                name: () => "Start Opens Journal",
+                tooltip: () => "Start button opens the Quest Log/Journal instead of inventory",
+                getValue: () => Config.EnableJournalButton,
+                setValue: value => Config.EnableJournalButton = value
             );
 
             // Inventory/Chest Settings

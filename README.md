@@ -2,7 +2,7 @@
 
 A SMAPI mod that brings console-style controller support to Android Stardew Valley. Play with a controller like you would on Nintendo Switch - 12-slot toolbar rows, proper shop purchasing, chest management, and more.
 
-## Current Version: 2.4.0
+## Current Version: 2.5.0
 
 ## Features
 
@@ -21,14 +21,15 @@ A SMAPI mod that brings console-style controller support to Android Stardew Vall
 - **LT/RT**: Move left/right within the current row
 - Visual toolbar matches console layout
 
-### D-Pad Toolbar Mode (For Controllers with Trigger Issues)
-- **D-Pad Up/Down**: Switch between toolbar rows
-- **LB/RB/D-Pad Left/Right**: Move left/right within the current row
-- Enable this if your controller's triggers aren't detected (see Known Issues)
+### Bumper Mode (For Controllers with Trigger Issues)
+When "Use Bumpers Instead of Triggers" is enabled:
+- **Toolbar**: D-Pad Up/Down switches rows, LB/RB moves within row
+- **Shops**: LB/RB adjusts purchase quantity
+- Enable this if your controller's triggers aren't detected (e.g., Xbox via Bluetooth)
 
 ### Shop Fixes
 - **A button**: Purchase items from any shop
-- **LT/RT**: Adjust purchase quantity before buying
+- **LT/RT** (or **LB/RB** in bumper mode): Adjust purchase quantity before buying
 - Respects available stock and player money
 
 ### Inventory & Chest Fixes
@@ -72,16 +73,16 @@ A SMAPI mod that brings console-style controller support to Android Stardew Vall
 
 | Controller | Device | Status | Notes |
 |------------|--------|--------|-------|
-| **Built-in (Odin)** | AYN Odin Pro | Fully Working | All buttons and triggers work |
-| **Xbox Wireless** | AYN Odin Pro | Partial | **Triggers (LT/RT) not detected** - use D-Pad mode |
+| **Built-in (Odin)** | AYN Odin Pro | ✅ Fully Working | All buttons and triggers work |
+| **Xbox Wireless (Bluetooth)** | AYN Odin Pro | ✅ Fully Working | All buttons work; **triggers (LT/RT) not detected** - use Bumper mode |
 
 ### Known Issues: Xbox Controller on Android
 
 Xbox Wireless Controllers connected via Bluetooth have a known issue on Android where the analog triggers (LT/RT) are not detected by Stardew Valley. This is due to Xbox controllers reporting triggers on different axes (`AXIS_GAS`/`AXIS_BRAKE`) than what the game's framework expects (`AXIS_LTRIGGER`/`AXIS_RTRIGGER`).
 
-**Workaround:** Enable "Use D-Pad for Toolbar (If triggers can't be detected)" in the mod settings. This remaps toolbar navigation to:
-- D-Pad Up/Down for switching rows
-- LB/RB/D-Pad Left/Right for switching tools
+**Workaround:** Enable "Use Bumpers Instead of Triggers" in the mod settings. This remaps:
+- Toolbar: D-Pad Up/Down for rows, LB/RB for moving within row
+- Shops: LB/RB for adjusting purchase quantity
 
 All other Xbox controller buttons (A/B/X/Y, bumpers, thumbsticks, D-Pad) work correctly.
 
@@ -103,7 +104,7 @@ Edit `config.json` or use Generic Mod Config Menu in-game:
   "ControlStyle": "Switch",
   "EnableShopPurchaseFix": true,
   "EnableToolbarNavFix": true,
-  "UseDpadForToolbarNav": false,
+  "UseBumpersInsteadOfTriggers": false,
   "EnableSortFix": true,
   "EnableAddToStacksFix": true,
   "EnableShippingBinFix": true,
@@ -117,7 +118,7 @@ Edit `config.json` or use Generic Mod Config Menu in-game:
 | `ControlStyle` | Control scheme: `Switch` (right=confirm) or `Xbox` (bottom=confirm) |
 | `EnableShopPurchaseFix` | A button purchases in shops |
 | `EnableToolbarNavFix` | Console-style toolbar with LB/RB/LT/RT |
-| `UseDpadForToolbarNav` | Use D-Pad for toolbar (if triggers don't work) |
+| `UseBumpersInsteadOfTriggers` | Use LB/RB instead of LT/RT (for Xbox Bluetooth controllers) |
 | `EnableSortFix` | X button sorts inventory/chests |
 | `EnableAddToStacksFix` | Y button adds to stacks in chests |
 | `EnableShippingBinFix` | A button stacks items in shipping bin |
@@ -153,7 +154,7 @@ Output: `bin/Release/net6.0/AndroidConsolizer X.X.X.zip`
 
 ### Triggers not working (Xbox controller)
 - This is a known Android limitation with Xbox Bluetooth controllers
-- Enable "Use D-Pad for Toolbar" in the mod settings as a workaround
+- Enable "Use Bumpers Instead of Triggers" in the mod settings as a workaround
 
 ## Compatibility
 
@@ -178,9 +179,14 @@ MIT License - Feel free to modify and redistribute.
 
 ## Changelog
 
+### 2.5.0
+- **Fixed X button inventory deletion bug** - Critical fix for Xbox layout + Switch style combination
+- The physical X button is now properly blocked in inventory screens regardless of button remapping
+- Fully tested with Odin built-in controls and external Xbox Wireless controllers via Bluetooth
+
 ### 2.4.0
 - **Xbox controller support** - Tested with Xbox Wireless Controller
-- **D-Pad toolbar mode** - Alternative navigation for controllers with trigger detection issues
+- **Bumper mode** - Use LB/RB instead of triggers for toolbar and shops
 - **Controller layout settings** - Support for Switch, Xbox, and PlayStation button layouts
 - **Control style settings** - Choose between Switch-style or Xbox-style confirm/cancel
 

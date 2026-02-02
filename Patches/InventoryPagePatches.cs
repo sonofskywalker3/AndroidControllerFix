@@ -57,12 +57,20 @@ namespace AndroidConsolizer.Patches
 
                 Monitor.Log($"GameMenu (inventory) button: {b} (remapped={remapped})", LogLevel.Debug);
 
-                // X button (after remapping) = Sort inventory (and block the original to prevent deletion)
+                // CRITICAL: Always block raw X button in inventory to prevent Android deletion bug
+                // The game's Android code uses raw X for deletion, regardless of our remapping
+                if (b == Buttons.X && ModEntry.Config.EnableSortFix)
+                {
+                    Monitor.Log($"Blocking raw X button in GameMenu inventory to prevent deletion", LogLevel.Debug);
+                    return false; // Block original method to prevent item deletion
+                }
+
+                // X button (after remapping) = Sort inventory (and block the original)
                 if (remapped == Buttons.X && ModEntry.Config.EnableSortFix)
                 {
                     Monitor.Log($"{b} remapped to X in GameMenu inventory - sorting (blocking original)", LogLevel.Debug);
                     SortPlayerInventory();
-                    return false; // Block original method to prevent item deletion
+                    return false; // Block original method
                 }
             }
             catch (Exception ex)
@@ -85,11 +93,19 @@ namespace AndroidConsolizer.Patches
 
                 Monitor.Log($"InventoryPage button: {b} (remapped={remapped})", LogLevel.Debug);
 
-                // Block X button (after remapping) entirely on InventoryPage - this is where deletion happens on Android
+                // CRITICAL: Always block raw X button on InventoryPage - this is where deletion happens on Android
+                // Must block regardless of remapping to prevent the deletion bug
+                if (b == Buttons.X)
+                {
+                    Monitor.Log($"Blocking raw X button in InventoryPage to prevent deletion", LogLevel.Debug);
+                    return false; // Block original method to prevent item deletion
+                }
+
+                // Also block remapped X button (e.g., physical Y on Xbox layout that remaps to X)
                 if (remapped == Buttons.X)
                 {
-                    Monitor.Log($"{b} remapped to X in InventoryPage - BLOCKING to prevent deletion", LogLevel.Debug);
-                    return false; // Block original method to prevent item deletion
+                    Monitor.Log($"{b} remapped to X in InventoryPage - BLOCKING", LogLevel.Debug);
+                    return false; // Block original method
                 }
             }
             catch (Exception ex)

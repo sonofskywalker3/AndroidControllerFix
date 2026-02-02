@@ -34,12 +34,19 @@ namespace AndroidConsolizer
         /// <summary>Whether to enable toolbar navigation fix (LB/RB switch rows, LT/RT move within row).</summary>
         public bool EnableToolbarNavFix { get; set; } = true;
 
+        /*********
+        ** Gameplay Shortcuts
+        *********/
+        /// <summary>Whether Start button opens the Quest Log/Journal instead of inventory.</summary>
+        public bool EnableJournalButton { get; set; } = true;
+
         /// <summary>
-        /// Use D-pad for toolbar navigation instead of triggers.
-        /// Up/Down switches rows, Left/Right switches tools.
-        /// For controllers where Stardew Valley can't read the triggers (e.g., Xbox on Android).
+        /// Use bumpers (LB/RB) instead of triggers (LT/RT) for controls.
+        /// Toolbar: D-Pad Up/Down switches rows, bumpers move within row.
+        /// Shops: Bumpers adjust purchase quantity.
+        /// For controllers where Stardew Valley can't read the triggers (e.g., Xbox via Bluetooth on Android).
         /// </summary>
-        public bool UseDpadForToolbarNav { get; set; } = false;
+        public bool UseBumpersInsteadOfTriggers { get; set; } = false;
 
         /*********
         ** Inventory & Chest Settings
