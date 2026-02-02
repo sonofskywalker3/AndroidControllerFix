@@ -8,7 +8,7 @@ using StardewModdingAPI.Events;
 using StardewValley;
 using StardewValley.Menus;
 
-namespace AndroidControllerFix
+namespace AndroidConsolizer
 {
     /// <summary>The mod entry point.</summary>
     public class ModEntry : Mod
@@ -56,6 +56,7 @@ namespace AndroidControllerFix
             Patches.InventoryPagePatches.Apply(harmony, this.Monitor);
             Patches.FarmerPatches.Apply(harmony, this.Monitor);
             Patches.ToolbarPatches.Apply(harmony, this.Monitor);
+            Patches.ShippingBinPatches.Apply(harmony, this.Monitor);
 
             // Register events
             helper.Events.GameLoop.GameLaunched += this.OnGameLaunched;
@@ -288,7 +289,7 @@ namespace AndroidControllerFix
 
             configMenu.AddParagraph(
                 mod: this.ModManifest,
-                text: () => "A Button: Purchase items in shops\n" +
+                text: () => "A Button: Purchase items in shops, add to shipping bin\n" +
                            "X Button: Sort (inventory or chest)\n" +
                            "Y Button: Add to existing stacks (in chest)\n" +
                            "LB/RB: Switch toolbar rows\n" +
@@ -343,6 +344,14 @@ namespace AndroidControllerFix
                 tooltip: () => "Y button adds matching items to existing stacks in chest",
                 getValue: () => Config.EnableAddToStacksFix,
                 setValue: value => Config.EnableAddToStacksFix = value
+            );
+
+            configMenu.AddBoolOption(
+                mod: this.ModManifest,
+                name: () => "Enable Shipping Bin Stacking",
+                tooltip: () => "A button properly stacks items in shipping bin instead of replacing",
+                getValue: () => Config.EnableShippingBinFix,
+                setValue: value => Config.EnableShippingBinFix = value
             );
 
             // Debug

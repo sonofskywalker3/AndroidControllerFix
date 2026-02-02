@@ -8,7 +8,7 @@ using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
 
-namespace AndroidControllerFix.Patches
+namespace AndroidConsolizer.Patches
 {
     /// <summary>Harmony patches for ShopMenu to fix controller purchasing.</summary>
     internal static class ShopMenuPatches

@@ -7,7 +7,7 @@ using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
 
-namespace AndroidControllerFix.Patches
+namespace AndroidConsolizer.Patches
 {
     /// <summary>Harmony patches to replace Android's scrolling toolbar with a fixed 12-slot console-style toolbar.</summary>
     internal static class ToolbarPatches
@@ -105,6 +105,25 @@ namespace AndroidControllerFix.Patches
                     int itemIndex = rowStart + i;
                     int slotX = toolbarX + (i * (SlotSize + SlotSpacing));
                     int slotY = toolbarY;
+                    bool isSelected = player.CurrentToolIndex == itemIndex;
+
+                    // Draw selection highlight FIRST (behind item), slightly larger than slot
+                    if (isSelected)
+                    {
+                        int borderPadding = 4;
+                        IClickableMenu.drawTextureBox(
+                            b,
+                            Game1.menuTexture,
+                            new Rectangle(0, 256, 60, 60),
+                            slotX - borderPadding,
+                            slotY - borderPadding,
+                            SlotSize + (borderPadding * 2),
+                            SlotSize + (borderPadding * 2),
+                            Color.White,
+                            1f,
+                            false
+                        );
+                    }
 
                     // Draw slot background
                     b.Draw(
@@ -114,25 +133,14 @@ namespace AndroidControllerFix.Patches
                         Color.White
                     );
 
-                    // Highlight selected slot
-                    if (player.CurrentToolIndex == itemIndex)
-                    {
-                        b.Draw(
-                            Game1.menuTexture,
-                            new Rectangle(slotX, slotY, SlotSize, SlotSize),
-                            new Rectangle(0, 256, 64, 64),
-                            Color.White
-                        );
-                    }
-
-                    // Draw item if present
+                    // Draw item on top
                     if (itemIndex < player.Items.Count && player.Items[itemIndex] != null)
                     {
                         var item = player.Items[itemIndex];
                         item.drawInMenu(
                             b,
                             new Vector2(slotX, slotY),
-                            player.CurrentToolIndex == itemIndex ? 1f : 0.8f,
+                            isSelected ? 1f : 0.8f,
                             1f,
                             0.9f,
                             StackDrawType.Draw,

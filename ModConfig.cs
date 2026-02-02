@@ -1,6 +1,6 @@
 using StardewModdingAPI;
 
-namespace AndroidControllerFix
+namespace AndroidConsolizer
 {
     /// <summary>The mod configuration model.</summary>
     public class ModConfig
@@ -25,6 +25,9 @@ namespace AndroidControllerFix
 
         /// <summary>Whether to enable Y button add-to-stacks (in chest).</summary>
         public bool EnableAddToStacksFix { get; set; } = true;
+
+        /// <summary>Whether to enable shipping bin stacking fix (A button adds to existing stacks).</summary>
+        public bool EnableShippingBinFix { get; set; } = true;
 
         /*********
         ** Legacy Settings (kept for compatibility but not used)

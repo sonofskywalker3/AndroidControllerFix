@@ -1,6 +1,40 @@
 # Changelog
 
-All notable changes to AndroidControllerFix will be documented in this file.
+All notable changes to Android Consolizer will be documented in this file.
+
+## [2.1.0] - 2026-02-01
+
+### Changed
+- **Complete shipping bin rewrite** - Replaced broken touch-based UI with console-style controls
+- No more "pick up and drop" - just select an item and press A to ship
+- Uses game's native `behaviorFunction` for proper integration
+
+### Fixed
+- **Shipping bin now works properly** - A button ships entire stack, Y button ships one item
+- **"Last shipped" display now updates** - Shows the item you just shipped
+- **Toolbar selection box** - Now properly sized and drawn behind items
+
+### Technical
+- Removed 200+ lines of drop zone/navigation hacking
+- Simplified to ~80 lines using the game's own shipping flow
+
+## [2.0.0] - 2026-02-01
+
+### Added
+- **Console-style toolbar** - 12-slot rows with LB/RB to switch rows, LT/RT to move within row
+- Custom toolbar rendering that matches console layout
+
+### Changed
+- Rebranded to Android Consolizer
+
+## [1.0.0] - 2026-01-31
+
+### Added
+- Initial stable release
+- Shop purchasing (A button)
+- Inventory/chest sorting (X button)
+- Add to stacks in chests (Y button)
+- X button deletion bug blocked
 
 ## [0.3.4] - 2026-01-31
 

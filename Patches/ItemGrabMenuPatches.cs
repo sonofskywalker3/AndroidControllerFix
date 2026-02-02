@@ -7,7 +7,7 @@ using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
 
-namespace AndroidControllerFix.Patches
+namespace AndroidConsolizer.Patches
 {
     /// <summary>Harmony patches for ItemGrabMenu to fix chest controller support.</summary>
     internal static class ItemGrabMenuPatches
@@ -42,6 +42,10 @@ namespace AndroidControllerFix.Patches
         {
             try
             {
+                // Skip shipping bins - they have their own handler in ShippingBinPatches
+                if (__instance.shippingBin)
+                    return true;
+
                 // Log all button presses in chest menu for debugging
                 Monitor.Log($"ItemGrabMenu button: {b}", LogLevel.Debug);
 

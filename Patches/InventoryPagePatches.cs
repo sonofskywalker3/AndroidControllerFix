@@ -7,7 +7,7 @@ using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
 
-namespace AndroidControllerFix.Patches
+namespace AndroidConsolizer.Patches
 {
     /// <summary>Harmony patches for InventoryPage to fix controller support.</summary>
     internal static class InventoryPagePatches

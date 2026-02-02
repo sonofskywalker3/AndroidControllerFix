@@ -1,34 +1,49 @@
-# Android Controller Fix
+# Android Consolizer
 
-A SMAPI mod that fixes broken controller support on Android Stardew Valley, enabling shop purchasing, inventory/chest sorting, and other actions that normally require touchscreen.
+A SMAPI mod that brings console-style controller support to Android Stardew Valley. Play with a controller like you would on Nintendo Switch - 12-slot toolbar rows, proper shop purchasing, chest management, and more.
 
-## Current Version: 1.0.0
+## Current Version: 2.1.0
 
 ## Features
 
-- **Shop Purchase (A button)**: Purchase items from any shop with controller
-  - Use LT/RT to adjust quantity before pressing A
-  - Respects available stock and player money
-- **Sort Inventory (X button)**: Sorts your inventory when in the inventory menu
-- **Sort Chest (X button)**: Sorts chest contents when viewing a chest
-- **Add to Stacks (Y button)**: Adds matching items from your inventory to existing stacks in chest
-- **Fixes X Button Deletion Bug**: The vanilla Android game has a bug where pressing X in the inventory deletes the selected item. This mod intercepts the X button input before the game sees it, completely preventing this bug.
+### Toolbar Navigation (Console-Style)
+- **12-slot toolbar rows** instead of Android's chaotic scrolling toolbar
+- **LB/RB**: Switch between toolbar rows (up to 3 rows with full backpack)
+- **LT/RT**: Move left/right within the current row
+- Visual toolbar matches console layout
 
-### Button Mappings
+### Shop Fixes
+- **A button**: Purchase items from any shop
+- **LT/RT**: Adjust purchase quantity before buying
+- Respects available stock and player money
+
+### Inventory & Chest Fixes
+- **X button (Inventory)**: Sort your inventory
+- **X button (Chest)**: Sort chest contents
+- **Y button (Chest)**: Add matching items to existing stacks
+- **X button deletion bug fixed**: The vanilla Android bug where X deletes items is completely blocked
+
+### Shipping Bin Fix (Console-Style)
+- **A button**: Ship entire stack from selected inventory slot
+- **Y button**: Ship one item from selected inventory slot
+- "Last shipped" display updates properly
+- No more drag-and-drop - just select and ship
+
+## Button Mappings
 
 | Context | Button | Action |
 |---------|--------|--------|
-| Shop | A | Purchase selected quantity |
-| Shop | LT/RT | Adjust purchase quantity |
-| Shop | Y | Switch to sell tab |
-| Shop | B | Switch to buy tab |
-| Inventory Menu | X | Sort inventory |
-| Chest Menu | X | Sort chest contents |
-| Chest Menu | Y | Add to existing stacks |
-
-### Shop Navigation
-- **Y button**: Switch to sell tab
-- **B button**: Switch back to buy tab
+| **Gameplay** | LB | Switch to previous toolbar row |
+| **Gameplay** | RB | Switch to next toolbar row |
+| **Gameplay** | LT | Move left in toolbar row |
+| **Gameplay** | RT | Move right in toolbar row |
+| **Shop** | A | Purchase selected quantity |
+| **Shop** | LT/RT | Adjust purchase quantity |
+| **Inventory** | X | Sort inventory |
+| **Chest** | X | Sort chest contents |
+| **Chest** | Y | Add to existing stacks |
+| **Shipping Bin** | A | Ship entire stack |
+| **Shipping Bin** | Y | Ship one item |
 
 ## Dependencies
 
@@ -41,7 +56,6 @@ A SMAPI mod that fixes broken controller support on Android Stardew Valley, enab
 
 ## Tested Devices
 
-This mod has only been tested on:
 - **AYN Odin** (Android gaming handheld)
 
 If you test on other devices, please report your results!
@@ -49,8 +63,8 @@ If you test on other devices, please report your results!
 ## Installation
 
 1. Download the latest release ZIP
-2. Install with SMAPI Launcher
-3. Launch the game via SMAPI Launcher
+2. Extract to your Mods folder (or install via SMAPI Launcher)
+3. Launch the game via SMAPI
 
 ## Configuration
 
@@ -59,11 +73,22 @@ Edit `config.json` or use Generic Mod Config Menu in-game:
 ```json
 {
   "EnableShopPurchaseFix": true,
+  "EnableToolbarNavFix": true,
   "EnableSortFix": true,
   "EnableAddToStacksFix": true,
+  "EnableShippingBinFix": true,
   "VerboseLogging": false
 }
 ```
+
+| Option | Description |
+|--------|-------------|
+| `EnableShopPurchaseFix` | A button purchases in shops |
+| `EnableToolbarNavFix` | Console-style toolbar with LB/RB/LT/RT |
+| `EnableSortFix` | X button sorts inventory/chests |
+| `EnableAddToStacksFix` | Y button adds to stacks in chests |
+| `EnableShippingBinFix` | A button stacks items in shipping bin |
+| `VerboseLogging` | Enable detailed debug logging |
 
 ## Building from Source
 
@@ -73,11 +98,11 @@ Edit `config.json` or use Generic Mod Config Menu in-game:
 
 ### Build
 ```bash
-cd AndroidControllerFix
+cd AndroidConsolizer
 dotnet build --configuration Release
 ```
 
-Output: `bin/Release/net6.0/AndroidControllerFix X.X.X.zip`
+Output: `bin/Release/net6.0/AndroidConsolizer X.X.X.zip`
 
 ## Troubleshooting
 
@@ -89,12 +114,20 @@ Output: `bin/Release/net6.0/AndroidControllerFix X.X.X.zip`
 - Enable `VerboseLogging` in config to see detailed logs
 - Check SMAPI log for error messages
 
+### Toolbar not showing 12 slots
+- Make sure `EnableToolbarNavFix` is `true` in config
+- The feature only works during gameplay (not in menus)
+
 ## Compatibility
 
 - **Stardew Valley Expanded**: Compatible
 - **Content Patcher**: Compatible
 - **Generic Mod Config Menu**: Compatible (optional)
 - **Star Control**: NOT compatible with Android (don't use together)
+
+## Why "Consolizer"?
+
+Android Stardew Valley has broken controller support that makes it nearly unplayable when docked to a TV (no touchscreen). This mod "consolizes" the experience - making it play like the Nintendo Switch version when using a controller.
 
 ## Credits
 
@@ -108,6 +141,20 @@ MIT License - Feel free to modify and redistribute.
 
 ## Changelog
 
+### 2.1.0
+- **Console-style shipping bin** - Complete rewrite using game's native shipping flow
+- A button ships entire stack, Y button ships one item
+- "Last shipped" display now works properly
+- Fixed toolbar selection box sizing
+
+### 2.0.0
+- **Rebranded to Android Consolizer**
+- **Console-style toolbar** - 12-slot rows with LB/RB to switch rows, LT/RT to move within row
+- Custom toolbar rendering that matches console layout
+
 ### 1.0.0
-- **Fixes X button deletion bug** - The X button no longer deletes your selected item in vanilla Android Stardew Valley. Input is intercepted before the game sees it.
-- All features tested and working on AYN Odin
+- Initial stable release
+- Shop purchasing (A button)
+- Inventory/chest sorting (X button)
+- Add to stacks in chests (Y button)
+- X button deletion bug blocked

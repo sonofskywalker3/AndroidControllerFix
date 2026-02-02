@@ -3,7 +3,7 @@ using HarmonyLib;
 using StardewModdingAPI;
 using StardewValley;
 
-namespace AndroidControllerFix.Patches
+namespace AndroidConsolizer.Patches
 {
     /// <summary>Harmony patches for Farmer to fix Android trigger toolbar navigation.</summary>
     internal static class FarmerPatches
