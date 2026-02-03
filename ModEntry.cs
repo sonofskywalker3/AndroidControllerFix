@@ -59,6 +59,7 @@ namespace AndroidConsolizer
             Patches.ToolbarPatches.Apply(harmony, this.Monitor);
             Patches.ShippingBinPatches.Apply(harmony, this.Monitor);
             Patches.GameplayButtonPatches.Apply(harmony, this.Monitor);
+            Patches.FishingRodPatches.Apply(harmony, this.Monitor);
 
             // Register events
             helper.Events.GameLoop.GameLaunched += this.OnGameLaunched;
@@ -216,30 +217,43 @@ namespace AndroidConsolizer
                 this.Monitor.Log($"Buttons pressed: {string.Join(", ", e.Pressed)}", LogLevel.Debug);
             }
 
-            // Intercept sort button BEFORE the game sees it (prevents Android deletion bug)
-            // With button remapping, check if any pressed button remaps to X (the sort action)
-            if (Config.EnableSortFix)
+            // Handle inventory menu buttons (sort, bait/tackle)
+            if (Game1.activeClickableMenu is GameMenu gameMenu && gameMenu.currentTab == GameMenu.inventoryTab)
             {
-                // Check if we're in the inventory menu
-                if (Game1.activeClickableMenu is GameMenu gameMenu && gameMenu.currentTab == GameMenu.inventoryTab)
+                foreach (var button in e.Pressed)
                 {
-                    foreach (var button in e.Pressed)
+                    // CRITICAL: Always suppress raw ControllerX in inventory to prevent Android deletion bug
+                    if (button == SButton.ControllerX && Config.EnableSortFix)
                     {
-                        // CRITICAL: Always suppress raw ControllerX in inventory to prevent Android deletion bug
-                        // The game's Android code uses raw X for deletion, regardless of our remapping
-                        if (button == SButton.ControllerX)
-                        {
-                            this.Monitor.Log($"Suppressing raw X button in inventory to prevent deletion", LogLevel.Debug);
-                            this.Helper.Input.Suppress(button);
-                        }
+                        this.Monitor.Log($"Suppressing raw X button in inventory to prevent deletion", LogLevel.Debug);
+                        this.Helper.Input.Suppress(button);
+                    }
 
-                        // Trigger sort when remapped button is X (e.g., physical Y on Xbox layout)
-                        if (ButtonRemapper.Remap(button) == SButton.ControllerX)
+                    SButton remapped = ButtonRemapper.Remap(button);
+
+                    // A button (after remapping) = Track bait/tackle selection for fishing rod
+                    if (remapped == SButton.ControllerA && Config.EnableFishingRodBaitFix)
+                    {
+                        Patches.FishingRodPatches.OnAButtonPressed(gameMenu, this.Monitor);
+                        // Don't suppress - let normal A behavior continue
+                    }
+
+                    // Y button (after remapping) = Fishing rod bait/tackle management
+                    if (remapped == SButton.ControllerY && Config.EnableFishingRodBaitFix)
+                    {
+                        if (Patches.FishingRodPatches.TryHandleBaitTackle(gameMenu, this.Helper, this.Monitor))
                         {
-                            this.Monitor.Log($"Intercepting {button} (remapped to X) in inventory - sorting", LogLevel.Debug);
                             this.Helper.Input.Suppress(button);
-                            Patches.InventoryPagePatches.SortPlayerInventory();
+                            continue; // Handled - don't process further
                         }
+                    }
+
+                    // X button (after remapping) = Sort inventory
+                    if (remapped == SButton.ControllerX && Config.EnableSortFix)
+                    {
+                        this.Monitor.Log($"Intercepting {button} (remapped to X) in inventory - sorting", LogLevel.Debug);
+                        this.Helper.Input.Suppress(button);
+                        Patches.InventoryPagePatches.SortPlayerInventory();
                     }
                 }
             }
@@ -733,6 +747,7 @@ namespace AndroidConsolizer
                 mod: this.ModManifest,
                 name: () => "Use Bumpers Instead of Triggers",
                 tooltip: () => "For controllers where triggers aren't detected (e.g., Xbox via Bluetooth).\n" +
+                              "Xbox triggers aren't detected.\n" +
                               "Toolbar: D-Pad Up/Down switches rows, LB/RB moves within row.\n" +
                               "Shops: LB/RB adjusts purchase quantity.",
                 getValue: () => Config.UseBumpersInsteadOfTriggers,
@@ -781,6 +796,16 @@ namespace AndroidConsolizer
                 tooltip: () => "A button ships items, Y button ships one item (console-style controls)",
                 getValue: () => Config.EnableShippingBinFix,
                 setValue: value => Config.EnableShippingBinFix = value
+            );
+
+            configMenu.AddBoolOption(
+                mod: this.ModManifest,
+                name: () => "Enable Fishing Rod Bait Fix",
+                tooltip: () => "Y button attaches/detaches bait and tackle from fishing rods (console-style).\n" +
+                              "Hold bait/tackle + press Y on rod = attach.\n" +
+                              "Press Y on rod with nothing held = detach (bait first, then tackle).",
+                getValue: () => Config.EnableFishingRodBaitFix,
+                setValue: value => Config.EnableFishingRodBaitFix = value
             );
 
             // Debug

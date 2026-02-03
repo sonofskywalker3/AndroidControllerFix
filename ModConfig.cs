@@ -60,6 +60,9 @@ namespace AndroidConsolizer
         /// <summary>Whether to enable shipping bin stacking fix (A button adds to existing stacks).</summary>
         public bool EnableShippingBinFix { get; set; } = true;
 
+        /// <summary>Whether to enable fishing rod bait/tackle fix (Y button attaches/detaches bait and tackle).</summary>
+        public bool EnableFishingRodBaitFix { get; set; } = true;
+
         /*********
         ** Legacy Settings (kept for compatibility but not used)
         *********/

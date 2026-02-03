@@ -2,7 +2,7 @@
 
 A SMAPI mod that brings console-style controller support to Android Stardew Valley. Play with a controller like you would on Nintendo Switch - 12-slot toolbar rows, proper shop purchasing, chest management, and more.
 
-## Current Version: 2.5.1
+## Current Version: 2.6.0
 
 ## Features
 
@@ -44,6 +44,12 @@ When "Use Bumpers Instead of Triggers" is enabled:
 - "Last shipped" display updates properly
 - No more drag-and-drop - just select and ship
 
+### Fishing Rod Bait/Tackle Fix
+- **A button on bait/tackle**: Select it for attachment
+- **Y button on fishing rod**: Attach selected bait/tackle, or detach if nothing selected
+- Works with Fiberglass Rod (bait only) and Iridium Rod (bait + tackle)
+- Swapping supported: attaching different bait/tackle swaps with existing
+
 ## Button Mappings
 
 | Context | Button | Action |
@@ -59,6 +65,8 @@ When "Use Bumpers Instead of Triggers" is enabled:
 | **Chest** | Y | Add to existing stacks |
 | **Shipping Bin** | A | Ship entire stack |
 | **Shipping Bin** | Y | Ship one item |
+| **Inventory** | A (on bait/tackle) | Select for rod attachment |
+| **Inventory** | Y (on fishing rod) | Attach selected bait/tackle or detach |
 
 ## Dependencies
 
@@ -74,7 +82,8 @@ When "Use Bumpers Instead of Triggers" is enabled:
 | Controller | Device | Status | Notes |
 |------------|--------|--------|-------|
 | **Built-in (Odin)** | AYN Odin Pro | ✅ Fully Working | All buttons and triggers work |
-| **Xbox Wireless (Bluetooth)** | AYN Odin Pro | ✅ Fully Working | All buttons work; **triggers (LT/RT) not detected** - use Bumper mode |
+| **Xbox One Wireless (Bluetooth)** | AYN Odin Pro | ✅ Fully Working | Triggers cannot be detected in game, enable "Use Bumpers Instead of Triggers" |
+| **Xbox Series X|S Wireless (Bluetooth)** | AYN Odin Pro | ✅ Fully Working | Triggers cannot be detected in game, enable "Use Bumpers Instead of Triggers" |
 
 ### Known Issues: Xbox Controller on Android
 
@@ -108,6 +117,7 @@ Edit `config.json` or use Generic Mod Config Menu in-game:
   "EnableSortFix": true,
   "EnableAddToStacksFix": true,
   "EnableShippingBinFix": true,
+  "EnableFishingRodBaitFix": true,
   "VerboseLogging": false
 }
 ```
@@ -122,6 +132,7 @@ Edit `config.json` or use Generic Mod Config Menu in-game:
 | `EnableSortFix` | X button sorts inventory/chests |
 | `EnableAddToStacksFix` | Y button adds to stacks in chests |
 | `EnableShippingBinFix` | A button stacks items in shipping bin |
+| `EnableFishingRodBaitFix` | Y button attaches/detaches bait and tackle from fishing rods |
 | `VerboseLogging` | Enable detailed debug logging |
 
 ## Building from Source
@@ -178,6 +189,13 @@ Android Stardew Valley has broken controller support that makes it nearly unplay
 MIT License - Feel free to modify and redistribute.
 
 ## Changelog
+
+### 2.6.0
+- **Fishing Rod Bait/Tackle Fix** - Controller support for attaching and detaching bait/tackle from fishing rods
+  - Press A on bait or tackle to select it
+  - Press Y on a fishing rod to attach the selected bait/tackle
+  - Press Y on a fishing rod with nothing selected to detach (bait first, then tackle)
+  - Supports stacking same bait type and swapping different bait/tackle
 
 ### 2.5.1
 - **Fixed shop stock bug** - Limited stock items now properly decrement when purchasing partial quantities
