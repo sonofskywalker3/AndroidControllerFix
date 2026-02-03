@@ -60,12 +60,14 @@ namespace AndroidConsolizer
             Patches.ShippingBinPatches.Apply(harmony, this.Monitor);
             Patches.GameplayButtonPatches.Apply(harmony, this.Monitor);
             Patches.FishingRodPatches.Apply(harmony, this.Monitor);
+            Patches.InventoryManagementPatches.Apply(harmony, this.Monitor);
 
             // Register events
             helper.Events.GameLoop.GameLaunched += this.OnGameLaunched;
             helper.Events.GameLoop.SaveLoaded += this.OnSaveLoaded;
             helper.Events.Input.ButtonsChanged += this.OnButtonsChanged;
             helper.Events.GameLoop.UpdateTicked += this.OnUpdateTicked;
+            helper.Events.Display.MenuChanged += this.OnMenuChanged;
 
             this.Monitor.Log("Android Consolizer loaded successfully.", LogLevel.Info);
         }
@@ -101,10 +103,27 @@ namespace AndroidConsolizer
             }
         }
 
+        /// <summary>Raised when a menu is opened or closed.</summary>
+        private void OnMenuChanged(object sender, StardewModdingAPI.Events.MenuChangedEventArgs e)
+        {
+            // Clean up inventory management state when leaving inventory
+            if (e.OldMenu is GameMenu oldGameMenu)
+            {
+                Patches.InventoryManagementPatches.OnMenuClosed();
+                Patches.FishingRodPatches.ClearSelection();
+            }
+        }
+
         /// <summary>Raised every game tick. Used to enforce toolbar row locking and handle triggers.</summary>
         private void OnUpdateTicked(object sender, UpdateTickedEventArgs e)
         {
             // X/Y swap is now handled by GameplayButtonPatches at the GamePad.GetState level
+
+            // Update inventory management (maintain held item visual) when in inventory menu
+            if (Config.EnableConsoleInventoryFix && Game1.activeClickableMenu is GameMenu gameMenu && gameMenu.currentTab == GameMenu.inventoryTab)
+            {
+                Patches.InventoryManagementPatches.OnUpdateTicked();
+            }
 
             // Only enforce toolbar fix during gameplay
             if (!Config.EnableToolbarNavFix || Game1.activeClickableMenu != null || !Context.IsPlayerFree)
@@ -220,6 +239,8 @@ namespace AndroidConsolizer
             // Handle inventory menu buttons (sort, bait/tackle)
             if (Game1.activeClickableMenu is GameMenu gameMenu && gameMenu.currentTab == GameMenu.inventoryTab)
             {
+                // Note: Y button hold-repeat is handled via polling in InventoryManagementPatches.OnUpdateTicked
+
                 foreach (var button in e.Pressed)
                 {
                     // CRITICAL: Always suppress raw ControllerX in inventory to prevent Android deletion bug
@@ -231,21 +252,41 @@ namespace AndroidConsolizer
 
                     SButton remapped = ButtonRemapper.Remap(button);
 
-                    // A button (after remapping) = Track bait/tackle selection for fishing rod
-                    if (remapped == SButton.ControllerA && Config.EnableFishingRodBaitFix)
+                    // A button (after remapping) = Console-style inventory management
+                    if (remapped == SButton.ControllerA)
                     {
-                        Patches.FishingRodPatches.OnAButtonPressed(gameMenu, this.Monitor);
-                        // Don't suppress - let normal A behavior continue
+                        // Try console-style inventory management first
+                        if (Config.EnableConsoleInventoryFix)
+                        {
+                            if (Patches.InventoryManagementPatches.HandleAButton(gameMenu, this.Monitor))
+                            {
+                                this.Helper.Input.Suppress(button);
+                                continue; // Handled by inventory management
+                            }
+                        }
+
+                        // Fall back to fishing rod bait tracking
+                        if (Config.EnableFishingRodBaitFix)
+                        {
+                            Patches.FishingRodPatches.OnAButtonPressed(gameMenu, this.Monitor);
+                            // Don't suppress - let normal A behavior continue
+                        }
                     }
 
                     // Y button (after remapping) = Fishing rod bait/tackle management
-                    if (remapped == SButton.ControllerY && Config.EnableFishingRodBaitFix)
+                    // Note: Single-stack pickup is handled via polling in InventoryManagementPatches.OnUpdateTicked
+                    if (remapped == SButton.ControllerY)
                     {
-                        if (Patches.FishingRodPatches.TryHandleBaitTackle(gameMenu, this.Helper, this.Monitor))
+                        // Try fishing rod bait/tackle management first
+                        if (Config.EnableFishingRodBaitFix)
                         {
-                            this.Helper.Input.Suppress(button);
-                            continue; // Handled - don't process further
+                            if (Patches.FishingRodPatches.TryHandleBaitTackle(gameMenu, this.Helper, this.Monitor))
+                            {
+                                this.Helper.Input.Suppress(button);
+                                continue; // Handled by fishing rod
+                            }
                         }
+                        // Single-stack pickup is handled via polling in OnUpdateTicked
                     }
 
                     // X button (after remapping) = Sort inventory
@@ -806,6 +847,16 @@ namespace AndroidConsolizer
                               "Press Y on rod with nothing held = detach (bait first, then tackle).",
                 getValue: () => Config.EnableFishingRodBaitFix,
                 setValue: value => Config.EnableFishingRodBaitFix = value
+            );
+
+            configMenu.AddBoolOption(
+                mod: this.ModManifest,
+                name: () => "Enable Console Inventory (A Button)",
+                tooltip: () => "A button picks up and places items like on Nintendo Switch.\n" +
+                              "A on item = pick up to cursor.\n" +
+                              "A on another slot = place/swap item.",
+                getValue: () => Config.EnableConsoleInventoryFix,
+                setValue: value => Config.EnableConsoleInventoryFix = value
             );
 
             // Debug

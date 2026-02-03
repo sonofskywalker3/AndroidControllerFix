@@ -34,6 +34,30 @@ namespace AndroidConsolizer.Patches
                     prefix: new HarmonyMethod(typeof(InventoryPagePatches), nameof(InventoryPage_ReceiveGamePadButton_Prefix))
                 );
 
+                // Patch InventoryMenu.receiveGamePadButton as well
+                harmony.Patch(
+                    original: AccessTools.Method(typeof(InventoryMenu), nameof(InventoryMenu.receiveGamePadButton)),
+                    prefix: new HarmonyMethod(typeof(InventoryPagePatches), nameof(InventoryMenu_ReceiveGamePadButton_Prefix))
+                );
+
+                // Patch leftClickHeld to block Android's hold-for-tooltip behavior
+                harmony.Patch(
+                    original: AccessTools.Method(typeof(InventoryPage), nameof(InventoryPage.leftClickHeld)),
+                    prefix: new HarmonyMethod(typeof(InventoryPagePatches), nameof(InventoryPage_LeftClickHeld_Prefix))
+                );
+
+                // Patch receiveLeftClick to block Android's A-button-as-click behavior
+                harmony.Patch(
+                    original: AccessTools.Method(typeof(InventoryPage), nameof(InventoryPage.receiveLeftClick)),
+                    prefix: new HarmonyMethod(typeof(InventoryPagePatches), nameof(InventoryPage_ReceiveLeftClick_Prefix))
+                );
+
+                // Patch InventoryMenu.receiveLeftClick as well
+                harmony.Patch(
+                    original: AccessTools.Method(typeof(InventoryMenu), nameof(InventoryMenu.receiveLeftClick)),
+                    prefix: new HarmonyMethod(typeof(InventoryPagePatches), nameof(InventoryMenu_ReceiveLeftClick_Prefix))
+                );
+
                 Monitor.Log("InventoryPage patches applied successfully.", LogLevel.Trace);
             }
             catch (Exception ex)
@@ -56,6 +80,16 @@ namespace AndroidConsolizer.Patches
                 Buttons remapped = ButtonRemapper.Remap(b);
 
                 Monitor.Log($"GameMenu (inventory) button: {b} (remapped={remapped})", LogLevel.Debug);
+
+                // Block A button when console inventory is enabled - we handle it ourselves
+                if (ModEntry.Config.EnableConsoleInventoryFix)
+                {
+                    if (b == Buttons.A || remapped == Buttons.A)
+                    {
+                        Monitor.Log($"Blocking A button in GameMenu inventory (console inventory mode)", LogLevel.Debug);
+                        return false;
+                    }
+                }
 
                 // CRITICAL: Always block raw X button in inventory to prevent Android deletion bug
                 // The game's Android code uses raw X for deletion, regardless of our remapping
@@ -82,8 +116,8 @@ namespace AndroidConsolizer.Patches
             return true; // Let original method run for other buttons
         }
 
-        /// <summary>Prefix for InventoryPage.receiveGamePadButton to block X button deletion.</summary>
-        /// <returns>False to block X button (prevents Android deletion bug), true to let it run.</returns>
+        /// <summary>Prefix for InventoryPage.receiveGamePadButton to block X and A buttons.</summary>
+        /// <returns>False to block the button, true to let it run.</returns>
         private static bool InventoryPage_ReceiveGamePadButton_Prefix(InventoryPage __instance, Buttons b)
         {
             try
@@ -92,6 +126,17 @@ namespace AndroidConsolizer.Patches
                 Buttons remapped = ButtonRemapper.Remap(b);
 
                 Monitor.Log($"InventoryPage button: {b} (remapped={remapped})", LogLevel.Debug);
+
+                // Block A button when console inventory is enabled - we handle it ourselves
+                // This prevents the default selection box and tooltip behavior
+                if (ModEntry.Config.EnableConsoleInventoryFix)
+                {
+                    if (b == Buttons.A || remapped == Buttons.A)
+                    {
+                        Monitor.Log($"Blocking A button in InventoryPage (console inventory mode)", LogLevel.Debug);
+                        return false;
+                    }
+                }
 
                 // CRITICAL: Always block raw X button on InventoryPage - this is where deletion happens on Android
                 // Must block regardless of remapping to prevent the deletion bug
@@ -115,6 +160,88 @@ namespace AndroidConsolizer.Patches
             }
 
             return true; // Let original method run for other buttons
+        }
+
+        /// <summary>Prefix for InventoryMenu.receiveGamePadButton to block A button.</summary>
+        private static bool InventoryMenu_ReceiveGamePadButton_Prefix(InventoryMenu __instance, Buttons b)
+        {
+            try
+            {
+                Buttons remapped = ButtonRemapper.Remap(b);
+
+                // Block A button when console inventory is enabled
+                if (ModEntry.Config.EnableConsoleInventoryFix)
+                {
+                    if (b == Buttons.A || remapped == Buttons.A)
+                    {
+                        Monitor.Log($"Blocking A button in InventoryMenu (console inventory mode)", LogLevel.Debug);
+                        return false;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Monitor.Log($"Error in InventoryMenu controller handler: {ex.Message}", LogLevel.Error);
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Prefix for InventoryPage.leftClickHeld to block Android's hold-for-tooltip behavior.
+        /// On Android, holding A button simulates leftClickHeld which triggers tooltips.
+        /// </summary>
+        private static bool InventoryPage_LeftClickHeld_Prefix(InventoryPage __instance, int x, int y)
+        {
+            // Block leftClickHeld when console inventory is enabled and A button is held
+            // This prevents the Android tooltip-on-hold behavior
+            if (ModEntry.Config.EnableConsoleInventoryFix)
+            {
+                GamePadState gpState = GamePad.GetState(Microsoft.Xna.Framework.PlayerIndex.One);
+                if (gpState.Buttons.A == ButtonState.Pressed)
+                {
+                    Monitor.Log($"Blocking leftClickHeld while A is pressed (console inventory mode)", LogLevel.Debug);
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Prefix for InventoryPage.receiveLeftClick to block Android's A-button-as-click behavior.
+        /// On Android, the A button may trigger receiveLeftClick which causes selection.
+        /// </summary>
+        private static bool InventoryPage_ReceiveLeftClick_Prefix(InventoryPage __instance, int x, int y, bool playSound)
+        {
+            if (ModEntry.Config.EnableConsoleInventoryFix)
+            {
+                GamePadState gpState = GamePad.GetState(Microsoft.Xna.Framework.PlayerIndex.One);
+                if (gpState.Buttons.A == ButtonState.Pressed)
+                {
+                    Monitor.Log($"Blocking receiveLeftClick while A is pressed (console inventory mode)", LogLevel.Debug);
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Prefix for InventoryMenu.receiveLeftClick to block Android's A-button-as-click behavior.
+        /// </summary>
+        private static bool InventoryMenu_ReceiveLeftClick_Prefix(InventoryMenu __instance, int x, int y, bool playSound)
+        {
+            // Only block in inventory page context, check if we're in GameMenu inventory tab
+            if (ModEntry.Config.EnableConsoleInventoryFix && Game1.activeClickableMenu is GameMenu gameMenu && gameMenu.currentTab == GameMenu.inventoryTab)
+            {
+                GamePadState gpState = GamePad.GetState(Microsoft.Xna.Framework.PlayerIndex.One);
+                if (gpState.Buttons.A == ButtonState.Pressed)
+                {
+                    Monitor.Log($"Blocking InventoryMenu.receiveLeftClick while A is pressed", LogLevel.Debug);
+                    return false;
+                }
+            }
+            return true;
         }
 
         /// <summary>Sort the player's inventory.</summary>

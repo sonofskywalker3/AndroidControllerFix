@@ -1,7 +1,7 @@
 {
     "Name": "Android Consolizer",
     "Author": "sonofskywalker3",
-    "Version": "2.6.0",
+    "Version": "2.7.0",
     "Description": "Brings console-style controller support to Android - 12-slot toolbar with row switching, shop purchasing, chest management, and inventory sorting.",
     "UniqueID": "sonofskywalker3.AndroidConsolizer",
     "EntryDll": "AndroidConsolizer.dll",

@@ -2,7 +2,7 @@
 
 A SMAPI mod that brings console-style controller support to Android Stardew Valley. Play with a controller like you would on Nintendo Switch - 12-slot toolbar rows, proper shop purchasing, chest management, and more.
 
-## Current Version: 2.6.0
+## Current Version: 2.7.0
 
 ## Features
 
@@ -44,9 +44,19 @@ When "Use Bumpers Instead of Triggers" is enabled:
 - "Last shipped" display updates properly
 - No more drag-and-drop - just select and ship
 
+### Console-Style Inventory Management
+- **A button on item**: Pick up entire stack to cursor (like Nintendo Switch)
+- **A button on slot**: Place or swap item (empty slot places, occupied slot swaps)
+- **Y button on stack**: Pick up a single item from a stack
+- **Hold Y**: Continuously pick up single items from the stack
+- Held items render visually at the cursor slot
+- Tooltips appear on hover when navigating with controller
+- Fishing rod tooltips shown when holding bait or tackle
+
 ### Fishing Rod Bait/Tackle Fix
-- **A button on bait/tackle**: Select it for attachment
-- **Y button on fishing rod**: Attach selected bait/tackle, or detach if nothing selected
+- **A button on bait/tackle**: Pick up to cursor for attachment
+- **Y button on fishing rod**: Attach held bait/tackle, or detach to cursor if nothing held
+- Detached bait/tackle goes to cursor (console-style) instead of first empty slot
 - Works with Fiberglass Rod (bait only) and Iridium Rod (bait + tackle)
 - Swapping supported: attaching different bait/tackle swaps with existing
 
@@ -63,10 +73,12 @@ When "Use Bumpers Instead of Triggers" is enabled:
 | **Inventory** | X | Sort inventory |
 | **Chest** | X | Sort chest contents |
 | **Chest** | Y | Add to existing stacks |
+| **Inventory** | A | Pick up / place / swap item |
+| **Inventory** | Y | Pick up single from stack (hold for continuous) |
 | **Shipping Bin** | A | Ship entire stack |
 | **Shipping Bin** | Y | Ship one item |
-| **Inventory** | A (on bait/tackle) | Select for rod attachment |
-| **Inventory** | Y (on fishing rod) | Attach selected bait/tackle or detach |
+| **Inventory** | A (on bait/tackle) | Pick up bait/tackle to cursor |
+| **Inventory** | Y (on fishing rod) | Attach held bait/tackle or detach to cursor |
 
 ## Dependencies
 
@@ -118,6 +130,7 @@ Edit `config.json` or use Generic Mod Config Menu in-game:
   "EnableAddToStacksFix": true,
   "EnableShippingBinFix": true,
   "EnableFishingRodBaitFix": true,
+  "EnableConsoleInventoryFix": true,
   "VerboseLogging": false
 }
 ```
@@ -133,6 +146,7 @@ Edit `config.json` or use Generic Mod Config Menu in-game:
 | `EnableAddToStacksFix` | Y button adds to stacks in chests |
 | `EnableShippingBinFix` | A button stacks items in shipping bin |
 | `EnableFishingRodBaitFix` | Y button attaches/detaches bait and tackle from fishing rods |
+| `EnableConsoleInventoryFix` | Console-style A button pick up/place/swap in inventory |
 | `VerboseLogging` | Enable detailed debug logging |
 
 ## Building from Source
@@ -189,6 +203,15 @@ Android Stardew Valley has broken controller support that makes it nearly unplay
 MIT License - Feel free to modify and redistribute.
 
 ## Changelog
+
+### 2.7.0
+- **Console-Style Inventory Management** - A button now works like Nintendo Switch
+  - A picks up entire stack to cursor, A again places or swaps
+  - Y picks up a single item from a stack, hold Y for continuous pickup
+  - Held items render visually at cursor slot position
+  - Controller hover tooltips appear when navigating inventory
+  - Fishing rod tooltip shown when holding bait or tackle (to see rod info before attaching)
+- **Improved Fishing Rod Bait/Tackle** - Detaching bait or tackle now puts it on the cursor instead of first empty slot, consistent with console behavior
 
 ### 2.6.0
 - **Fishing Rod Bait/Tackle Fix** - Controller support for attaching and detaching bait/tackle from fishing rods

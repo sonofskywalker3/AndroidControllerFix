@@ -63,6 +63,9 @@ namespace AndroidConsolizer
         /// <summary>Whether to enable fishing rod bait/tackle fix (Y button attaches/detaches bait and tackle).</summary>
         public bool EnableFishingRodBaitFix { get; set; } = true;
 
+        /// <summary>Whether to enable console-style inventory management (A picks up items, A again places/swaps).</summary>
+        public bool EnableConsoleInventoryFix { get; set; } = true;
+
         /*********
         ** Legacy Settings (kept for compatibility but not used)
         *********/

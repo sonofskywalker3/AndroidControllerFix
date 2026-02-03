@@ -126,7 +126,19 @@ namespace AndroidConsolizer.Patches
                 if (ModEntry.Config.VerboseLogging)
                     Monitor.Log($"FishingRod: Y pressed on rod '{rod.Name}'", LogLevel.Debug);
 
-                // Check if we have a selected bait/tackle slot
+                // First check if holding bait/tackle on cursor (console-style inventory management)
+                Item cursorItem = Game1.player.CursorSlotItem;
+                if (cursorItem != null && (cursorItem.Category == BaitCategory || cursorItem.Category == TackleCategory))
+                {
+                    Monitor.Log($"FishingRod: Attaching cursor item {cursorItem.Name} to rod", LogLevel.Debug);
+                    bool result = HandleAttachFromCursor(rod, cursorItem);
+
+                    // Clear any tracked selection since we used cursor item
+                    SelectedBaitTackleSlot = -1;
+                    return result;
+                }
+
+                // Fall back to check if we have a selected bait/tackle slot (old behavior)
                 if (SelectedBaitTackleSlot >= 0 && SelectedBaitTackleSlot < Game1.player.Items.Count)
                 {
                     Item selectedItem = Game1.player.Items[SelectedBaitTackleSlot];
@@ -157,6 +169,122 @@ namespace AndroidConsolizer.Patches
                 Monitor.Log(ex.StackTrace, LogLevel.Debug);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Handle attaching an item from the cursor (CursorSlotItem) to the fishing rod.
+        /// </summary>
+        private static bool HandleAttachFromCursor(FishingRod rod, Item item)
+        {
+            // Check if item is bait
+            if (item.Category == BaitCategory)
+            {
+                if (!rod.CanUseBait())
+                {
+                    Monitor.Log($"FishingRod: Rod cannot use bait", LogLevel.Debug);
+                    Game1.playSound("cancel");
+                    return true;
+                }
+
+                return AttachBaitFromCursor(rod, item);
+            }
+
+            // Check if item is tackle
+            if (item.Category == TackleCategory)
+            {
+                if (!rod.CanUseTackle())
+                {
+                    Monitor.Log($"FishingRod: Rod cannot use tackle", LogLevel.Debug);
+                    Game1.playSound("cancel");
+                    return true;
+                }
+
+                return AttachTackleFromCursor(rod, item);
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Attach bait from cursor to rod's bait slot.
+        /// </summary>
+        private static bool AttachBaitFromCursor(FishingRod rod, Item baitItem)
+        {
+            SObject currentBait = rod.attachments[0];
+
+            if (currentBait == null)
+            {
+                // Empty slot - attach directly
+                rod.attachments[0] = (SObject)baitItem;
+                Game1.player.CursorSlotItem = null;
+                InventoryManagementPatches.OnCursorItemCleared();
+                Game1.playSound("button1");
+                Monitor.Log($"FishingRod: Attached {baitItem.Stack}x {baitItem.Name} from cursor to bait slot", LogLevel.Info);
+            }
+            else if (currentBait.canStackWith(baitItem))
+            {
+                // Same bait type - stack
+                int spaceAvailable = currentBait.maximumStackSize() - currentBait.Stack;
+                int toAdd = Math.Min(spaceAvailable, baitItem.Stack);
+
+                if (toAdd > 0)
+                {
+                    currentBait.Stack += toAdd;
+                    baitItem.Stack -= toAdd;
+
+                    if (baitItem.Stack <= 0)
+                    {
+                        Game1.player.CursorSlotItem = null;
+                        InventoryManagementPatches.OnCursorItemCleared();
+                    }
+
+                    Game1.playSound("button1");
+                    Monitor.Log($"FishingRod: Stacked {toAdd}x bait from cursor (now {currentBait.Stack})", LogLevel.Info);
+                }
+                else
+                {
+                    Game1.playSound("cancel");
+                    Monitor.Log($"FishingRod: Bait slot full, cannot stack more", LogLevel.Debug);
+                }
+            }
+            else
+            {
+                // Different bait - swap
+                rod.attachments[0] = (SObject)baitItem;
+                Game1.player.CursorSlotItem = currentBait;
+                Game1.playSound("button1");
+                Monitor.Log($"FishingRod: Swapped bait - attached {baitItem.Name} from cursor, put {currentBait.Name} on cursor", LogLevel.Info);
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Attach tackle from cursor to rod's tackle slot.
+        /// </summary>
+        private static bool AttachTackleFromCursor(FishingRod rod, Item tackleItem)
+        {
+            SObject currentTackle = rod.attachments[1];
+
+            if (currentTackle == null)
+            {
+                // Empty slot - attach directly
+                rod.attachments[1] = (SObject)tackleItem;
+                Game1.player.CursorSlotItem = null;
+                InventoryManagementPatches.OnCursorItemCleared();
+                Game1.playSound("button1");
+                Monitor.Log($"FishingRod: Attached {tackleItem.Name} from cursor to tackle slot", LogLevel.Info);
+            }
+            else
+            {
+                // Tackle doesn't stack - swap
+                rod.attachments[1] = (SObject)tackleItem;
+                Game1.player.CursorSlotItem = currentTackle;
+                Game1.playSound("button1");
+                Monitor.Log($"FishingRod: Swapped tackle - attached {tackleItem.Name} from cursor, put {currentTackle.Name} on cursor", LogLevel.Info);
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -275,26 +403,28 @@ namespace AndroidConsolizer.Patches
         /// <summary>
         /// Handle detaching bait/tackle from the fishing rod.
         /// Priority: Bait first, then tackle.
+        /// Detached items go to cursor (console-style behavior).
         /// </summary>
         private static bool HandleDetachItem(FishingRod rod)
         {
+            // Check if already holding something on cursor
+            if (Game1.player.CursorSlotItem != null)
+            {
+                if (ModEntry.Config.VerboseLogging)
+                    Monitor.Log($"FishingRod: Cannot detach - already holding item on cursor", LogLevel.Debug);
+                Game1.playSound("cancel");
+                return true;
+            }
+
             // Try to detach bait first
             SObject bait = rod.attachments[0];
             if (bait != null)
             {
                 rod.attachments[0] = null;
-
-                if (TryPutInInventory(bait))
-                {
-                    Game1.playSound("button1");
-                    Monitor.Log($"FishingRod: Removed {bait.Stack}x {bait.Name} to inventory", LogLevel.Info);
-                    return true;
-                }
-
-                // Failed - put it back
-                rod.attachments[0] = bait;
-                Game1.playSound("cancel");
-                Monitor.Log($"FishingRod: Could not remove bait - no space", LogLevel.Warn);
+                Game1.player.CursorSlotItem = bait;
+                InventoryManagementPatches.SetHoldingItem(true);
+                Game1.playSound("button1");
+                Monitor.Log($"FishingRod: Detached {bait.Stack}x {bait.Name} to cursor", LogLevel.Info);
                 return true;
             }
 
@@ -303,47 +433,16 @@ namespace AndroidConsolizer.Patches
             if (tackle != null)
             {
                 rod.attachments[1] = null;
-
-                if (TryPutInInventory(tackle))
-                {
-                    Game1.playSound("button1");
-                    Monitor.Log($"FishingRod: Removed {tackle.Name} to inventory", LogLevel.Info);
-                    return true;
-                }
-
-                // Failed - put it back
-                rod.attachments[1] = tackle;
-                Game1.playSound("cancel");
-                Monitor.Log($"FishingRod: Could not remove tackle - no space", LogLevel.Warn);
+                Game1.player.CursorSlotItem = tackle;
+                InventoryManagementPatches.SetHoldingItem(true);
+                Game1.playSound("button1");
+                Monitor.Log($"FishingRod: Detached {tackle.Name} to cursor", LogLevel.Info);
                 return true;
             }
 
             // No attachments to remove
             if (ModEntry.Config.VerboseLogging)
                 Monitor.Log($"FishingRod: No attachments to remove", LogLevel.Debug);
-            return false;
-        }
-
-        /// <summary>
-        /// Try to put an item in an empty inventory slot.
-        /// </summary>
-        private static bool TryPutInInventory(Item item)
-        {
-            try
-            {
-                for (int i = 0; i < Game1.player.Items.Count; i++)
-                {
-                    if (Game1.player.Items[i] == null)
-                    {
-                        Game1.player.Items[i] = item;
-                        return true;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Monitor.Log($"FishingRod: Failed to put in inventory: {ex.Message}", LogLevel.Debug);
-            }
             return false;
         }
 
