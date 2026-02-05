@@ -510,9 +510,9 @@ namespace AndroidConsolizer.Patches
                 string priceText;
                 int total = sellPrice * sellItem.Stack;
                 if (sellItem.Stack > 1)
-                    priceText = $"{total}g ({sellPrice}g each)";
+                    priceText = $" {total}g ({sellPrice}g each)";
                 else
-                    priceText = $"{sellPrice}g";
+                    priceText = $" {sellPrice}g";
 
                 // Manually position a small tooltip box near the selected inventory slot
                 // (drawToolTip/drawHoverText position at mouse cursor which is wrong on sell tab)
@@ -520,10 +520,17 @@ namespace AndroidConsolizer.Patches
                 if (snapped == null)
                     return;
 
+                // Gold coin sprite: Game1.mouseCursors at (193, 373, 9, 10), drawn at 4x
+                int coinScale = 4;
+                int coinW = 9 * coinScale;  // 36px
+                int coinH = 10 * coinScale; // 40px
+
                 Vector2 textSize = Game1.smallFont.MeasureString(priceText);
-                int pad = 24;
-                int boxW = (int)textSize.X + pad * 2;
-                int boxH = (int)textSize.Y + pad * 2;
+                int contentW = coinW + (int)textSize.X;
+                int contentH = Math.Max(coinH, (int)textSize.Y);
+                int pad = 20;
+                int boxW = contentW + pad * 2;
+                int boxH = contentH + pad * 2;
 
                 // Position to the right of the selected slot
                 int boxX = snapped.bounds.Right + 8;
@@ -539,8 +546,19 @@ namespace AndroidConsolizer.Patches
 
                 IClickableMenu.drawTextureBox(b, Game1.menuTexture, new Rectangle(0, 256, 60, 60),
                     boxX, boxY, boxW, boxH, Color.White);
+
+                // Draw gold coin icon
+                int innerX = boxX + pad;
+                int innerY = boxY + pad;
+                b.Draw(Game1.mouseCursors,
+                    new Vector2(innerX, innerY + (contentH - coinH) / 2),
+                    new Rectangle(193, 373, 9, 10),
+                    Color.White, 0f, Vector2.Zero, coinScale, SpriteEffects.None, 1f);
+
+                // Draw price text to the right of the coin
                 Utility.drawTextWithShadow(b, priceText, Game1.smallFont,
-                    new Vector2(boxX + pad, boxY + pad), Game1.textColor);
+                    new Vector2(innerX + coinW, innerY + (contentH - (int)textSize.Y) / 2),
+                    Game1.textColor);
             }
             catch
             {
