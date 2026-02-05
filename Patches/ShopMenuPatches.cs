@@ -65,67 +65,33 @@ namespace AndroidConsolizer.Patches
                     return;
                 }
 
-                // === DIAGNOSTIC v2.7.8: Dump ShopMenu state to find tab-tracking field ===
-                var snapped = __instance.currentlySnappedComponent;
-                Monitor.Log($"[DIAG] snapped: myID={snapped?.myID ?? -1}, name='{snapped?.name ?? "null"}', bounds={snapped?.bounds}", LogLevel.Debug);
-
-                // Dump all bool, int, and string fields on ShopMenu
-                var shopType = typeof(ShopMenu);
-                foreach (var field in shopType.GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public))
+                // Check if we're in sell mode via inventoryVisible field.
+                // Diagnostic v2.7.8 confirmed: inventoryVisible=False on buy tab, True on sell tab.
+                // currentTab stays 0 in both modes — not useful.
+                var invVisibleField = AccessTools.Field(typeof(ShopMenu), "inventoryVisible");
+                if (invVisibleField != null)
                 {
-                    var fType = field.FieldType;
-                    if (fType == typeof(bool) || fType == typeof(int) || fType == typeof(string))
+                    bool inventoryVisible = (bool)invVisibleField.GetValue(__instance);
+                    if (inventoryVisible)
                     {
-                        try
-                        {
-                            var val = field.GetValue(__instance);
-                            Monitor.Log($"[DIAG] {field.Name} ({fType.Name}) = {val ?? "null"}", LogLevel.Debug);
-                        }
-                        catch { }
+                        Monitor.Log("inventoryVisible=True — on sell tab, skipping purchase", LogLevel.Trace);
+                        return;
                     }
                 }
 
-                // Also dump public properties (bool/int/string)
-                foreach (var prop in shopType.GetProperties(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public))
-                {
-                    var pType = prop.PropertyType;
-                    if ((pType == typeof(bool) || pType == typeof(int) || pType == typeof(string)) && prop.CanRead)
-                    {
-                        try
-                        {
-                            var val = prop.GetValue(__instance);
-                            Monitor.Log($"[DIAG] {prop.Name} ({pType.Name}) = {val ?? "null"}", LogLevel.Debug);
-                        }
-                        catch { }
-                    }
-                }
-
-                // Log hoveredItem for reference
+                // Use hoveredItem to find the selected item.
+                // On Android, forSaleButtons all have myID=-500 so we can't match by ID.
+                // hoveredItem is set correctly by the game's navigation on the buy tab.
+                ISalable selectedItem = null;
                 var hoveredField = AccessTools.Field(typeof(ShopMenu), "hoveredItem");
-                ISalable hoveredItem = hoveredField?.GetValue(__instance) as ISalable;
-                Monitor.Log($"[DIAG] hoveredItem: {hoveredItem?.DisplayName ?? "null"}", LogLevel.Debug);
-
-                // Log the inventory section component count for context
-                var inventoryField = AccessTools.Field(typeof(ShopMenu), "inventory");
-                var inventory = inventoryField?.GetValue(__instance);
-                if (inventory != null)
+                if (hoveredField != null)
                 {
-                    var invType = inventory.GetType();
-                    Monitor.Log($"[DIAG] inventory type: {invType.FullName}", LogLevel.Debug);
-                    var isActiveField = invType.GetField("isActive", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    var highlightField = invType.GetField("highlightMethod", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (isActiveField != null)
-                        Monitor.Log($"[DIAG] inventory.isActive = {isActiveField.GetValue(inventory)}", LogLevel.Debug);
+                    selectedItem = hoveredField.GetValue(__instance) as ISalable;
                 }
 
-                Monitor.Log("[DIAG] === END DIAGNOSTIC DUMP ===", LogLevel.Debug);
-
-                // Still attempt the purchase using hoveredItem + forSale check (known to
-                // have sell-tab bug — this is a diagnostic build, not a fix)
-                ISalable selectedItem = hoveredItem;
-                if (selectedItem == null || !__instance.forSale.Contains(selectedItem))
+                if (selectedItem == null)
                 {
-                    Monitor.Log($"hoveredItem not in forSale — skipping purchase", LogLevel.Debug);
+                    Monitor.Log("No hoveredItem — skipping purchase", LogLevel.Trace);
                     return;
                 }
 
