@@ -15,17 +15,30 @@ namespace AndroidConsolizer.Patches
     {
         private static IMonitor Monitor;
 
+        // Cache reflection fields for performance
+        private static FieldInfo InvVisibleField;
+        private static FieldInfo HoveredItemField;
+        private static FieldInfo QuantityToBuyField;
+
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
         {
             Monitor = monitor;
 
+            // Cache reflection lookups
+            InvVisibleField = AccessTools.Field(typeof(ShopMenu), "inventoryVisible");
+            HoveredItemField = AccessTools.Field(typeof(ShopMenu), "hoveredItem");
+            QuantityToBuyField = AccessTools.Field(typeof(ShopMenu), "quantityToBuy");
+
             try
             {
-                // Patch receiveGamePadButton to intercept A button for purchasing
+                // PREFIX on receiveGamePadButton — must run BEFORE vanilla to read
+                // hoveredItem before the game moves the selection on A press.
+                // Returns false for A button to prevent vanilla from also handling it
+                // (which causes the cursor to jump to a different item).
                 harmony.Patch(
                     original: AccessTools.Method(typeof(ShopMenu), nameof(ShopMenu.receiveGamePadButton)),
-                    postfix: new HarmonyMethod(typeof(ShopMenuPatches), nameof(ReceiveGamePadButton_Postfix))
+                    prefix: new HarmonyMethod(typeof(ShopMenuPatches), nameof(ReceiveGamePadButton_Prefix))
                 );
 
                 // Patch update to handle held button for bulk purchasing
@@ -42,67 +55,53 @@ namespace AndroidConsolizer.Patches
             }
         }
 
-        /// <summary>Postfix for receiveGamePadButton to handle A button purchase.</summary>
-        private static void ReceiveGamePadButton_Postfix(ShopMenu __instance, Buttons b)
+        /// <summary>
+        /// Prefix for receiveGamePadButton — handles A button purchase BEFORE vanilla code.
+        /// Returns false for A button to skip vanilla handler (which moves selection).
+        /// Returns true for all other buttons to let vanilla handle them normally.
+        /// </summary>
+        private static bool ReceiveGamePadButton_Prefix(ShopMenu __instance, Buttons b)
         {
             try
             {
-                // Remap button based on configured button style
                 Buttons remapped = ButtonRemapper.Remap(b);
 
-                // Always log button presses to confirm patch is working
-                Monitor.Log($"ShopMenu postfix: button={b} (remapped={remapped})", LogLevel.Debug);
-
-                // Only handle A button (confirm/purchase) after remapping
+                // Let all non-A buttons pass through to vanilla
                 if (remapped != Buttons.A)
-                    return;
-
-                Monitor.Log("A button in shop - attempting purchase fix", LogLevel.Info);
+                    return true;
 
                 if (!ModEntry.Config?.EnableShopPurchaseFix ?? true)
-                {
-                    Monitor.Log("Shop purchase fix is disabled in config", LogLevel.Debug);
-                    return;
-                }
+                    return true; // Disabled — let vanilla handle A
 
-                // Check if we're in sell mode via inventoryVisible field.
-                // Diagnostic v2.7.8 confirmed: inventoryVisible=False on buy tab, True on sell tab.
-                // currentTab stays 0 in both modes — not useful.
-                var invVisibleField = AccessTools.Field(typeof(ShopMenu), "inventoryVisible");
-                if (invVisibleField != null)
+                // Check sell mode via inventoryVisible field.
+                // inventoryVisible=False on buy tab, True on sell tab.
+                if (InvVisibleField != null)
                 {
-                    bool inventoryVisible = (bool)invVisibleField.GetValue(__instance);
+                    bool inventoryVisible = (bool)InvVisibleField.GetValue(__instance);
                     if (inventoryVisible)
                     {
-                        Monitor.Log("inventoryVisible=True — on sell tab, skipping purchase", LogLevel.Trace);
-                        return;
+                        Monitor.Log("inventoryVisible=True — on sell tab, passing A to vanilla", LogLevel.Trace);
+                        return true; // Let vanilla handle selling
                     }
                 }
 
-                // Use hoveredItem to find the selected item.
-                // On Android, forSaleButtons all have myID=-500 so we can't match by ID.
-                // hoveredItem is set correctly by the game's navigation on the buy tab.
-                ISalable selectedItem = null;
-                var hoveredField = AccessTools.Field(typeof(ShopMenu), "hoveredItem");
-                if (hoveredField != null)
-                {
-                    selectedItem = hoveredField.GetValue(__instance) as ISalable;
-                }
+                // Read hoveredItem BEFORE vanilla code can change it
+                ISalable selectedItem = HoveredItemField?.GetValue(__instance) as ISalable;
 
                 if (selectedItem == null)
                 {
-                    Monitor.Log("No hoveredItem — skipping purchase", LogLevel.Trace);
-                    return;
+                    Monitor.Log("No hoveredItem — passing A to vanilla", LogLevel.Trace);
+                    return true;
+                }
+
+                // Verify it's actually a for-sale item
+                if (!__instance.itemPriceAndStock.TryGetValue(selectedItem, out var priceAndStock))
+                {
+                    Monitor.Log($"No price info for {selectedItem.DisplayName} — passing A to vanilla", LogLevel.Trace);
+                    return true;
                 }
 
                 Monitor.Log($"Selected item: {selectedItem.DisplayName}", LogLevel.Debug);
-
-                // Get price info
-                if (!__instance.itemPriceAndStock.TryGetValue(selectedItem, out var priceAndStock))
-                {
-                    Monitor.Log($"No price info for {selectedItem.DisplayName}", LogLevel.Warn);
-                    return;
-                }
 
                 int unitPrice = priceAndStock.Price;
                 int stock = priceAndStock.Stock;
@@ -110,10 +109,9 @@ namespace AndroidConsolizer.Patches
 
                 // Get the quantity to buy (set by LT/RT)
                 int quantity = 1;
-                var quantityField = AccessTools.Field(typeof(ShopMenu), "quantityToBuy");
-                if (quantityField != null)
+                if (QuantityToBuyField != null)
                 {
-                    quantity = Math.Max(1, (int)quantityField.GetValue(__instance));
+                    quantity = Math.Max(1, (int)QuantityToBuyField.GetValue(__instance));
                 }
 
                 // Limit to available stock
@@ -129,32 +127,28 @@ namespace AndroidConsolizer.Patches
                 // Limit to what player can afford
                 if (playerMoney < totalCost)
                 {
-                    int affordableQty = playerMoney / unitPrice;
+                    int affordableQty = unitPrice > 0 ? playerMoney / unitPrice : 0;
                     if (affordableQty <= 0)
                     {
                         Game1.playSound("cancel");
                         Monitor.Log("Cannot afford any", LogLevel.Debug);
-                        return;
+                        return false; // Block vanilla A handler
                     }
                     quantity = affordableQty;
                     totalCost = unitPrice * quantity;
                     Monitor.Log($"Reduced quantity to {quantity} (affordable)", LogLevel.Debug);
                 }
 
-                // Manual purchase
-                Monitor.Log($"Purchasing {quantity}x {selectedItem.DisplayName} for {totalCost}...", LogLevel.Debug);
-
                 // Check inventory space
                 if (selectedItem is Item item && !Game1.player.couldInventoryAcceptThisItem(item))
                 {
                     Game1.playSound("cancel");
                     Monitor.Log("Inventory full", LogLevel.Debug);
-                    return;
+                    return false; // Block vanilla A handler
                 }
 
                 // Deduct money
                 ShopMenu.chargePlayer(Game1.player, __instance.currency, totalCost);
-                Monitor.Log($"Charged player {totalCost}", LogLevel.Debug);
 
                 // Add item(s) to inventory
                 if (selectedItem is Item purchaseItem)
@@ -177,7 +171,6 @@ namespace AndroidConsolizer.Patches
                     }
                     else
                     {
-                        // Update the stock count in itemPriceAndStock
                         var newStockInfo = new ItemStockInformation(
                             priceAndStock.Price,
                             remaining,
@@ -190,18 +183,21 @@ namespace AndroidConsolizer.Patches
                 }
 
                 // Reset quantity selector to 1 after purchase
-                if (quantityField != null)
+                if (QuantityToBuyField != null)
                 {
-                    quantityField.SetValue(__instance, 1);
+                    QuantityToBuyField.SetValue(__instance, 1);
                 }
 
                 Game1.playSound("purchaseClick");
                 Monitor.Log($"Purchase complete! Bought {quantity}x {selectedItem.DisplayName}", LogLevel.Info);
+
+                return false; // Skip vanilla A handler — prevents cursor jump
             }
             catch (Exception ex)
             {
-                Monitor.Log($"Error in shop purchase postfix: {ex.Message}", LogLevel.Error);
+                Monitor.Log($"Error in shop purchase prefix: {ex.Message}", LogLevel.Error);
                 Monitor.Log(ex.StackTrace, LogLevel.Debug);
+                return true; // On error, let vanilla handle it
             }
         }
 

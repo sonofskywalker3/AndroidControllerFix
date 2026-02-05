@@ -101,7 +101,8 @@ RE-IMPLEMENT (was in v2.9.0, lost in revert)
 - **Symptom:** Tapping the "inventory" button in the shop interface (to switch to sell mode via touch) doesn't draw the controller cursor or let you select inventory items the way pressing Y does.
 - **Log evidence (v2.7.2):** MouseLeft events at 21:25:14 and 21:25:22 in Pierre's ShopMenu — user tapped the inventory/sell tab button on the touchscreen. No mod log output suggests the tap was handled by the game but the controller snap navigation didn't update to the inventory grid.
 - **Root cause:** The shop has two modes — buy (forSale list) and sell (player inventory). Pressing Y switches modes correctly and snap navigation works in sell mode. But tapping the inventory tab button via touchscreen doesn't trigger whatever Y does to set up snap navigation for the inventory grid.
-- **Fix:** Detect when the shop switches to inventory/sell mode (regardless of whether it was triggered by Y or touch) and ensure snap navigation is properly initialized. May need to patch the tab button click handler or detect the mode change in `Update_Postfix`.
+- **Confirmed again (v2.7.9):** User tapped the inventory button (top-left of shop UI) with touchscreen. Controller navigation did not work on the resulting sell screen, unlike pressing Y which works correctly.
+- **Fix:** Detect when the shop switches to inventory/sell mode (regardless of whether it was triggered by Y or touch) and ensure snap navigation is properly initialized. May need to patch the tab button click handler or detect the mode change in `Update_Postfix`. The `inventoryVisible` field (discovered in v2.7.8 diagnostic) tracks buy/sell state and could be polled in Update_Postfix to detect mode changes.
 
 ---
 
