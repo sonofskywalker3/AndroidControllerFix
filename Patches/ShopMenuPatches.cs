@@ -86,7 +86,10 @@ namespace AndroidConsolizer.Patches
                 // Try to determine which item is selected
                 ISalable selectedItem = null;
 
-                // Method 1: Check if snapped component is a forSaleButton
+                // Check if snapped component is a forSaleButton.
+                // If not, we're on the sell/inventory tab — do NOT attempt a purchase.
+                // (Previous fallbacks to hoveredItem/first-visible caused the sell-tab buy bug:
+                // pressing A on inventory items triggered purchases using stale buy-list data.)
                 if (snapped != null && __instance.forSaleButtons != null)
                 {
                     int btnIndex = __instance.forSaleButtons.FindIndex(btn => btn.myID == snapped.myID);
@@ -101,26 +104,10 @@ namespace AndroidConsolizer.Patches
                     }
                 }
 
-                // Method 2: Check hoveredItem field
                 if (selectedItem == null)
                 {
-                    var hoveredField = AccessTools.Field(typeof(ShopMenu), "hoveredItem");
-                    if (hoveredField != null)
-                    {
-                        selectedItem = hoveredField.GetValue(__instance) as ISalable;
-                        Monitor.Log($"hoveredItem field: {selectedItem?.DisplayName ?? "null"}", LogLevel.Debug);
-                    }
-                }
-
-                // Method 3: Just use first visible item as test
-                if (selectedItem == null && __instance.forSale?.Count > 0)
-                {
-                    int testIndex = Math.Max(0, __instance.currentItemIndex);
-                    if (testIndex < __instance.forSale.Count)
-                    {
-                        selectedItem = __instance.forSale[testIndex];
-                        Monitor.Log($"Using first visible item as fallback: {selectedItem?.DisplayName}", LogLevel.Debug);
-                    }
+                    Monitor.Log($"Snapped component {snapped?.myID ?? -1} is not a forSale button — not in buy mode, skipping purchase", LogLevel.Trace);
+                    return;
                 }
 
                 if (selectedItem == null)
