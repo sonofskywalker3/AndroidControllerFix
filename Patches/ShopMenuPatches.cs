@@ -106,6 +106,9 @@ namespace AndroidConsolizer.Patches
                 int unitPrice = priceAndStock.Price;
                 int stock = priceAndStock.Stock;
                 int playerMoney = ShopMenu.getPlayerCurrencyAmount(Game1.player, __instance.currency);
+                string tradeItem = priceAndStock.TradeItem;
+                int tradeItemCost = priceAndStock.TradeItemCount ?? 0;
+                int totalTradeItems = 0;
 
                 // Get the quantity to buy (set by LT/RT)
                 int quantity = 1;
@@ -139,6 +142,34 @@ namespace AndroidConsolizer.Patches
                     Monitor.Log($"Reduced quantity to {quantity} (affordable)", LogLevel.Debug);
                 }
 
+                // Limit quantity by available trade items (Desert Trader, etc.)
+                if (!string.IsNullOrEmpty(tradeItem) && tradeItemCost > 0)
+                {
+                    int playerTradeItems = 0;
+                    foreach (Item invItem in Game1.player.Items)
+                    {
+                        if (invItem != null && (invItem.QualifiedItemId == tradeItem || invItem.ItemId == tradeItem))
+                            playerTradeItems += invItem.Stack;
+                    }
+
+                    int maxByTradeItems = playerTradeItems / tradeItemCost;
+                    if (maxByTradeItems <= 0)
+                    {
+                        Game1.playSound("cancel");
+                        Monitor.Log($"Not enough trade items ({tradeItem}): need {tradeItemCost}, have {playerTradeItems}", LogLevel.Debug);
+                        return false;
+                    }
+
+                    if (quantity > maxByTradeItems)
+                    {
+                        quantity = maxByTradeItems;
+                        totalCost = unitPrice * quantity;
+                        Monitor.Log($"Reduced quantity to {quantity} (limited by trade items)", LogLevel.Debug);
+                    }
+
+                    totalTradeItems = tradeItemCost * quantity;
+                }
+
                 // Check inventory space
                 if (selectedItem is Item item && !Game1.player.couldInventoryAcceptThisItem(item))
                 {
@@ -149,6 +180,30 @@ namespace AndroidConsolizer.Patches
 
                 // Deduct money
                 ShopMenu.chargePlayer(Game1.player, __instance.currency, totalCost);
+
+                // Consume trade items if required
+                if (totalTradeItems > 0)
+                {
+                    int toConsume = totalTradeItems;
+                    for (int i = 0; i < Game1.player.Items.Count && toConsume > 0; i++)
+                    {
+                        Item invItem = Game1.player.Items[i];
+                        if (invItem != null && (invItem.QualifiedItemId == tradeItem || invItem.ItemId == tradeItem))
+                        {
+                            if (invItem.Stack <= toConsume)
+                            {
+                                toConsume -= invItem.Stack;
+                                Game1.player.Items[i] = null;
+                            }
+                            else
+                            {
+                                invItem.Stack -= toConsume;
+                                toConsume = 0;
+                            }
+                        }
+                    }
+                    Monitor.Log($"Consumed {totalTradeItems}x {tradeItem}", LogLevel.Debug);
+                }
 
                 // Call actionWhenPurchased — handles recipes, tool upgrades, trash can upgrades, etc.
                 string shopId = __instance.ShopId;
