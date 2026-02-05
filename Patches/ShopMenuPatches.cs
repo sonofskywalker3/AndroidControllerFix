@@ -80,8 +80,49 @@ namespace AndroidConsolizer.Patches
                     bool inventoryVisible = (bool)InvVisibleField.GetValue(__instance);
                     if (inventoryVisible)
                     {
-                        Monitor.Log("inventoryVisible=True — on sell tab, passing A to vanilla", LogLevel.Trace);
-                        return true; // Let vanilla handle selling
+                        // Sell tab — A button sells the full stack (console behavior)
+                        ISalable hoveredSalable = HoveredItemField?.GetValue(__instance) as ISalable;
+                        if (hoveredSalable == null || !(hoveredSalable is Item sellItem))
+                        {
+                            Monitor.Log("Sell tab: no item under cursor, passing to vanilla", LogLevel.Trace);
+                            return true;
+                        }
+
+                        int sellPrice;
+                        if (sellItem is StardewValley.Object obj)
+                            sellPrice = obj.sellToStorePrice();
+                        else
+                        {
+                            int sp = sellItem.salePrice();
+                            sellPrice = sp > 0 ? sp / 2 : -1;
+                        }
+
+                        if (sellPrice <= 0)
+                        {
+                            Game1.playSound("cancel");
+                            Monitor.Log($"Sell tab: {sellItem.DisplayName} cannot be sold (price={sellPrice})", LogLevel.Debug);
+                            return false;
+                        }
+
+                        int stack = sellItem.Stack;
+                        int totalPrice = sellPrice * stack;
+
+                        // Credit player with gold (selling always gives gold regardless of shop currency)
+                        Game1.player.Money += totalPrice;
+
+                        // Remove item from player inventory
+                        int idx = Game1.player.Items.IndexOf(sellItem);
+                        if (idx >= 0)
+                        {
+                            Game1.player.Items[idx] = null;
+                        }
+
+                        // Clear hovered item to avoid stale reference
+                        HoveredItemField?.SetValue(__instance, null);
+
+                        Game1.playSound("purchaseClick");
+                        Monitor.Log($"Sold {stack}x {sellItem.DisplayName} for {totalPrice}g ({sellPrice}g each)", LogLevel.Info);
+                        return false;
                     }
                 }
 
