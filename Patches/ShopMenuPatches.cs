@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using StardewModdingAPI;
 using StardewValley;
@@ -53,6 +54,12 @@ namespace AndroidConsolizer.Patches
                 harmony.Patch(
                     original: AccessTools.Method(typeof(ShopMenu), nameof(ShopMenu.update)),
                     postfix: new HarmonyMethod(typeof(ShopMenuPatches), nameof(Update_Postfix))
+                );
+
+                // Patch draw to show sell price tooltip on sell tab
+                harmony.Patch(
+                    original: AccessTools.Method(typeof(ShopMenu), nameof(ShopMenu.draw), new[] { typeof(SpriteBatch) }),
+                    postfix: new HarmonyMethod(typeof(ShopMenuPatches), nameof(ShopMenu_Draw_Postfix))
                 );
 
                 Monitor.Log("ShopMenu patches applied successfully.", LogLevel.Trace);
@@ -442,6 +449,68 @@ namespace AndroidConsolizer.Patches
                         QuantityToBuyField.SetValue(__instance, 1);
                     }
                 }
+            }
+        }
+
+        /// <summary>
+        /// Draw postfix — shows sell price tooltip when hovering items on the sell tab.
+        /// Redraws the tooltip on top of vanilla's (which has no price) with the sell price
+        /// added via moneyAmountToDisplayAtBottom, matching the buy tab's coin icon style.
+        /// </summary>
+        private static void ShopMenu_Draw_Postfix(ShopMenu __instance, SpriteBatch b)
+        {
+            try
+            {
+                if (!ModEntry.Config?.EnableShopPurchaseFix ?? true)
+                    return;
+
+                if (InvVisibleField == null)
+                    return;
+
+                bool inventoryVisible = (bool)InvVisibleField.GetValue(__instance);
+                if (!inventoryVisible)
+                    return;
+
+                ISalable hoveredSalable = HoveredItemField?.GetValue(__instance) as ISalable;
+                if (hoveredSalable == null || !(hoveredSalable is Item sellItem))
+                    return;
+
+                int sellPrice;
+                if (sellItem is StardewValley.Object obj)
+                    sellPrice = obj.sellToStorePrice();
+                else
+                {
+                    int sp = sellItem.salePrice();
+                    sellPrice = sp > 0 ? sp / 2 : -1;
+                }
+
+                if (sellPrice <= 0)
+                    return;
+
+                string description = sellItem.getDescription() ?? "";
+                if (sellItem.Stack > 1)
+                {
+                    int totalValue = sellPrice * sellItem.Stack;
+                    description += $"\n\nStack of {sellItem.Stack}: {totalValue}g total";
+                }
+
+                IClickableMenu.drawToolTip(
+                    b,
+                    description,
+                    sellItem.DisplayName,
+                    sellItem,
+                    false,      // heldItem
+                    0,          // currencySymbol (0 = gold)
+                    0,          // extraItemToShowIndex
+                    null,       // extraItemToShowAmount
+                    sellPrice,  // moneyAmountToDisplayAtBottom
+                    null,       // boldTitleText
+                    -1          // healAmountToDisplay
+                );
+            }
+            catch
+            {
+                // Silently ignore tooltip draw errors — never crash the draw loop
             }
         }
     }
