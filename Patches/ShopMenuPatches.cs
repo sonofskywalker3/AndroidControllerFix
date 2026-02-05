@@ -96,8 +96,8 @@ namespace AndroidConsolizer.Patches
                         bool inventoryVisible = (bool)InvVisibleField.GetValue(__instance);
                         if (inventoryVisible)
                         {
-                            ISalable hoveredSalable = HoveredItemField?.GetValue(__instance) as ISalable;
-                            if (hoveredSalable != null && hoveredSalable is Item sellItem)
+                            Item sellItem = GetSellTabSelectedItem(__instance);
+                            if (sellItem != null)
                             {
                                 bool sold = SellOneItem(__instance, sellItem);
                                 if (sold)
@@ -122,10 +122,12 @@ namespace AndroidConsolizer.Patches
                     if (inventoryVisible)
                     {
                         // Sell tab — A button sells the full stack (console behavior)
-                        ISalable hoveredSalable = HoveredItemField?.GetValue(__instance) as ISalable;
-                        if (hoveredSalable == null || !(hoveredSalable is Item sellItem))
+                        // Use snap navigation to find selected item (hoveredItem is not set
+                        // on the sell tab with controller — performHoverAction uses mouse pos)
+                        Item sellItem = GetSellTabSelectedItem(__instance);
+                        if (sellItem == null)
                         {
-                            Monitor.Log("Sell tab: no item under cursor, passing to vanilla", LogLevel.Trace);
+                            Monitor.Log("Sell tab: no item at snapped slot, passing to vanilla", LogLevel.Trace);
                             return true;
                         }
 
@@ -358,6 +360,23 @@ namespace AndroidConsolizer.Patches
             }
         }
 
+        /// <summary>
+        /// Get the inventory item at the currently snapped component on the sell tab.
+        /// On Android, hoveredItem is not set for controller users on the sell tab because
+        /// performHoverAction uses mouse position which doesn't track snap navigation.
+        /// Instead, we find the snapped component in the inventory slot list directly.
+        /// </summary>
+        private static Item GetSellTabSelectedItem(ShopMenu shop)
+        {
+            var snapped = shop.currentlySnappedComponent;
+            if (snapped == null) return null;
+
+            int slotIndex = shop.inventory.inventory.IndexOf(snapped);
+            if (slotIndex < 0 || slotIndex >= shop.inventory.actualInventory.Count) return null;
+
+            return shop.inventory.actualInventory[slotIndex];
+        }
+
         /// <summary>Sell one unit of the given item. Returns true if sold successfully.</summary>
         private static bool SellOneItem(ShopMenu shop, Item sellItem)
         {
@@ -415,8 +434,8 @@ namespace AndroidConsolizer.Patches
                     if (_yHoldTicks > SellHoldDelay &&
                         (_yHoldTicks - SellHoldDelay) % SellRepeatRate == 0)
                     {
-                        ISalable hoveredSalable = HoveredItemField?.GetValue(__instance) as ISalable;
-                        if (hoveredSalable is Item sellItem && sellItem == _yHoldTargetItem)
+                        Item sellItem = GetSellTabSelectedItem(__instance);
+                        if (sellItem != null && sellItem == _yHoldTargetItem)
                         {
                             SellOneItem(__instance, sellItem);
                         }
@@ -471,8 +490,8 @@ namespace AndroidConsolizer.Patches
                 if (!inventoryVisible)
                     return;
 
-                ISalable hoveredSalable = HoveredItemField?.GetValue(__instance) as ISalable;
-                if (hoveredSalable == null || !(hoveredSalable is Item sellItem))
+                Item sellItem = GetSellTabSelectedItem(__instance);
+                if (sellItem == null)
                     return;
 
                 int sellPrice;
