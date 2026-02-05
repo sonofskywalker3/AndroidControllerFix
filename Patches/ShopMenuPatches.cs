@@ -65,52 +65,71 @@ namespace AndroidConsolizer.Patches
                     return;
                 }
 
-                // Log shop state
-                Monitor.Log($"Shop state: currentItemIndex={__instance.currentItemIndex}, forSale count={__instance.forSale?.Count ?? -1}", LogLevel.Debug);
-
-                // Determine if we're on the buy list using a spatial check.
-                // On Android: forSaleButtons all have myID=-500 (can't match by ID), and
-                // hoveredItem is stale across tab switches (can't trust it alone).
-                // Instead, check if the snapped component is physically positioned over a
-                // forSaleButton. On the sell tab, the snapped component is in the inventory
-                // area which doesn't overlap with the buy-list buttons.
+                // === DIAGNOSTIC v2.7.8: Dump ShopMenu state to find tab-tracking field ===
                 var snapped = __instance.currentlySnappedComponent;
-                int snappedBtnIndex = -1;
-                if (snapped != null && __instance.forSaleButtons != null)
+                Monitor.Log($"[DIAG] snapped: myID={snapped?.myID ?? -1}, name='{snapped?.name ?? "null"}', bounds={snapped?.bounds}", LogLevel.Debug);
+
+                // Dump all bool, int, and string fields on ShopMenu
+                var shopType = typeof(ShopMenu);
+                foreach (var field in shopType.GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public))
                 {
-                    int cx = snapped.bounds.Center.X;
-                    int cy = snapped.bounds.Center.Y;
-                    for (int i = 0; i < __instance.forSaleButtons.Count; i++)
+                    var fType = field.FieldType;
+                    if (fType == typeof(bool) || fType == typeof(int) || fType == typeof(string))
                     {
-                        if (__instance.forSaleButtons[i].containsPoint(cx, cy))
+                        try
                         {
-                            snappedBtnIndex = i;
-                            break;
+                            var val = field.GetValue(__instance);
+                            Monitor.Log($"[DIAG] {field.Name} ({fType.Name}) = {val ?? "null"}", LogLevel.Debug);
                         }
+                        catch { }
                     }
                 }
 
-                if (snappedBtnIndex < 0)
+                // Also dump public properties (bool/int/string)
+                foreach (var prop in shopType.GetProperties(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public))
                 {
-                    Monitor.Log($"Snapped component not over any forSaleButton — not in buy mode, skipping", LogLevel.Trace);
+                    var pType = prop.PropertyType;
+                    if ((pType == typeof(bool) || pType == typeof(int) || pType == typeof(string)) && prop.CanRead)
+                    {
+                        try
+                        {
+                            var val = prop.GetValue(__instance);
+                            Monitor.Log($"[DIAG] {prop.Name} ({pType.Name}) = {val ?? "null"}", LogLevel.Debug);
+                        }
+                        catch { }
+                    }
+                }
+
+                // Log hoveredItem for reference
+                var hoveredField = AccessTools.Field(typeof(ShopMenu), "hoveredItem");
+                ISalable hoveredItem = hoveredField?.GetValue(__instance) as ISalable;
+                Monitor.Log($"[DIAG] hoveredItem: {hoveredItem?.DisplayName ?? "null"}", LogLevel.Debug);
+
+                // Log the inventory section component count for context
+                var inventoryField = AccessTools.Field(typeof(ShopMenu), "inventory");
+                var inventory = inventoryField?.GetValue(__instance);
+                if (inventory != null)
+                {
+                    var invType = inventory.GetType();
+                    Monitor.Log($"[DIAG] inventory type: {invType.FullName}", LogLevel.Debug);
+                    var isActiveField = invType.GetField("isActive", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    var highlightField = invType.GetField("highlightMethod", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (isActiveField != null)
+                        Monitor.Log($"[DIAG] inventory.isActive = {isActiveField.GetValue(inventory)}", LogLevel.Debug);
+                }
+
+                Monitor.Log("[DIAG] === END DIAGNOSTIC DUMP ===", LogLevel.Debug);
+
+                // Still attempt the purchase using hoveredItem + forSale check (known to
+                // have sell-tab bug — this is a diagnostic build, not a fix)
+                ISalable selectedItem = hoveredItem;
+                if (selectedItem == null || !__instance.forSale.Contains(selectedItem))
+                {
+                    Monitor.Log($"hoveredItem not in forSale — skipping purchase", LogLevel.Debug);
                     return;
                 }
 
-                // Use the spatial match to find the selected item
-                int itemIndex = __instance.currentItemIndex + snappedBtnIndex;
-                ISalable selectedItem = null;
-                if (itemIndex >= 0 && itemIndex < __instance.forSale.Count)
-                {
-                    selectedItem = __instance.forSale[itemIndex];
-                }
-
-                if (selectedItem == null)
-                {
-                    Monitor.Log($"Could not determine item at index {itemIndex}", LogLevel.Warn);
-                    return;
-                }
-
-                Monitor.Log($"Selected item: {selectedItem.DisplayName} (button {snappedBtnIndex}, index {itemIndex})", LogLevel.Debug);
+                Monitor.Log($"Selected item: {selectedItem.DisplayName}", LogLevel.Debug);
 
                 // Get price info
                 if (!__instance.itemPriceAndStock.TryGetValue(selectedItem, out var priceAndStock))
