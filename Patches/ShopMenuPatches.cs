@@ -141,6 +141,15 @@ namespace AndroidConsolizer.Patches
                             return true;
                         }
 
+                        // Check if this shop accepts the item (matches vanilla grayed-out logic)
+                        if (!__instance.highlightItemToSell(sellItem))
+                        {
+                            Game1.playSound("cancel");
+                            if (ModEntry.Config.VerboseLogging)
+                                Monitor.Log($"Sell tab: shop doesn't accept {sellItem.DisplayName} (category {sellItem.Category})", LogLevel.Debug);
+                            return false;
+                        }
+
                         int sellPrice;
                         if (sellItem is StardewValley.Object obj)
                             sellPrice = obj.sellToStorePrice();
@@ -406,6 +415,15 @@ namespace AndroidConsolizer.Patches
         /// <summary>Sell one unit of the given item. Returns true if sold successfully.</summary>
         private static bool SellOneItem(ShopMenu shop, Item sellItem)
         {
+            // Check if this shop accepts the item (matches vanilla grayed-out logic)
+            if (!shop.highlightItemToSell(sellItem))
+            {
+                Game1.playSound("cancel");
+                if (ModEntry.Config.VerboseLogging)
+                    Monitor.Log($"Sell tab: shop doesn't accept {sellItem.DisplayName} (category {sellItem.Category})", LogLevel.Debug);
+                return false;
+            }
+
             int sellPrice;
             if (sellItem is StardewValley.Object obj)
                 sellPrice = obj.sellToStorePrice();
@@ -672,6 +690,10 @@ namespace AndroidConsolizer.Patches
 
                 Item sellItem = GetSellTabSelectedItem(__instance);
                 if (sellItem == null)
+                    return;
+
+                // Don't show tooltip for items this shop doesn't accept (grayed-out items)
+                if (!__instance.highlightItemToSell(sellItem))
                     return;
 
                 // Only show sell tooltip for Object items (crops, fish, minerals, etc.)
