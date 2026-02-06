@@ -20,6 +20,7 @@ namespace AndroidConsolizer.Patches
         private static FieldInfo InvVisibleField;
         private static FieldInfo HoveredItemField;
         private static FieldInfo QuantityToBuyField;
+        private static FieldInfo InventoryButtonField;
 
         // Y button sell-one hold tracking
         private static bool _yHeldOnSellTab;
@@ -47,6 +48,7 @@ namespace AndroidConsolizer.Patches
             InvVisibleField = AccessTools.Field(typeof(ShopMenu), "inventoryVisible");
             HoveredItemField = AccessTools.Field(typeof(ShopMenu), "hoveredItem");
             QuantityToBuyField = AccessTools.Field(typeof(ShopMenu), "quantityToBuy");
+            InventoryButtonField = AccessTools.Field(typeof(ShopMenu), "inventoryButton");
 
             try
             {
@@ -65,11 +67,10 @@ namespace AndroidConsolizer.Patches
                     postfix: new HarmonyMethod(typeof(ShopMenuPatches), nameof(Update_Postfix))
                 );
 
-                // DIAGNOSTIC: Patch receiveLeftClick to log touch tab button behavior
+                // Block touch inventoryButton (sell tab toggle) when controller is connected
                 harmony.Patch(
                     original: AccessTools.Method(typeof(ShopMenu), nameof(ShopMenu.receiveLeftClick)),
-                    prefix: new HarmonyMethod(typeof(ShopMenuPatches), nameof(ReceiveLeftClick_DiagPrefix)),
-                    postfix: new HarmonyMethod(typeof(ShopMenuPatches), nameof(ReceiveLeftClick_DiagPostfix))
+                    prefix: new HarmonyMethod(typeof(ShopMenuPatches), nameof(ReceiveLeftClick_Prefix))
                 );
 
                 // Patch draw to show sell price tooltip on sell tab
@@ -772,67 +773,37 @@ namespace AndroidConsolizer.Patches
             }
         }
 
-        // ===================== DIAGNOSTIC — REMOVE AFTER TESTING =====================
-
-        private static bool _diagInvVisibleBefore;
-
-        /// <summary>DIAGNOSTIC: Log state before receiveLeftClick to detect touch tab toggle.</summary>
-        private static void ReceiveLeftClick_DiagPrefix(ShopMenu __instance, int x, int y)
+        /// <summary>
+        /// Prefix for receiveLeftClick — blocks the touch "inventoryButton" (sell tab toggle)
+        /// when a controller is connected. Tab switching should only happen via controller button.
+        /// </summary>
+        private static bool ReceiveLeftClick_Prefix(ShopMenu __instance, int x, int y)
         {
             try
             {
-                bool invVisible = InvVisibleField != null && (bool)InvVisibleField.GetValue(__instance);
-                _diagInvVisibleBefore = invVisible;
-                Monitor.Log($"[DIAG] receiveLeftClick({x}, {y}) — inventoryVisible BEFORE: {invVisible}", LogLevel.Info);
+                if (!ModEntry.Config?.EnableShopPurchaseFix ?? true)
+                    return true;
 
-                // Log the upperRightCloseButton bounds if it exists
-                if (__instance.upperRightCloseButton != null)
-                {
-                    var b = __instance.upperRightCloseButton.bounds;
-                    Monitor.Log($"[DIAG]   upperRightCloseButton: ({b.X},{b.Y},{b.Width},{b.Height}) name={__instance.upperRightCloseButton.name}", LogLevel.Info);
-                }
+                if (!GamePad.GetState(PlayerIndex.One).IsConnected)
+                    return true;
 
-                // Log all named clickable components on the menu
-                foreach (var field in typeof(ShopMenu).GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance))
+                if (InventoryButtonField == null)
+                    return true;
+
+                var invButton = InventoryButtonField.GetValue(__instance) as ClickableComponent;
+                if (invButton != null && invButton.containsPoint(x, y))
                 {
-                    if (field.FieldType == typeof(ClickableComponent) || field.FieldType == typeof(ClickableTextureComponent))
-                    {
-                        var comp = field.GetValue(__instance) as ClickableComponent;
-                        if (comp != null)
-                        {
-                            bool hit = comp.containsPoint(x, y);
-                            Monitor.Log($"[DIAG]   field={field.Name} myID={comp.myID} bounds=({comp.bounds.X},{comp.bounds.Y},{comp.bounds.Width},{comp.bounds.Height}) name=\"{comp.name}\" HIT={hit}", LogLevel.Info);
-                        }
-                    }
+                    if (ModEntry.Config.VerboseLogging)
+                        Monitor.Log("Blocked touch inventoryButton tap (controller connected)", LogLevel.Debug);
+                    return false; // Block the click — don't let vanilla toggle inventoryVisible
                 }
             }
             catch (Exception ex)
             {
-                Monitor.Log($"[DIAG] prefix error: {ex.Message}", LogLevel.Error);
+                Monitor.Log($"Error in receiveLeftClick prefix: {ex.Message}", LogLevel.Error);
             }
-        }
 
-        /// <summary>DIAGNOSTIC: Log state after receiveLeftClick to detect if inventoryVisible changed.</summary>
-        private static void ReceiveLeftClick_DiagPostfix(ShopMenu __instance, int x, int y)
-        {
-            try
-            {
-                bool invVisibleAfter = InvVisibleField != null && (bool)InvVisibleField.GetValue(__instance);
-                if (invVisibleAfter != _diagInvVisibleBefore)
-                {
-                    Monitor.Log($"[DIAG] *** inventoryVisible CHANGED: {_diagInvVisibleBefore} -> {invVisibleAfter} *** click=({x},{y})", LogLevel.Warn);
-                }
-                else
-                {
-                    Monitor.Log($"[DIAG] inventoryVisible unchanged: {invVisibleAfter}", LogLevel.Info);
-                }
-            }
-            catch (Exception ex)
-            {
-                Monitor.Log($"[DIAG] postfix error: {ex.Message}", LogLevel.Error);
-            }
+            return true;
         }
-
-        // ===================== END DIAGNOSTIC =====================
     }
 }
