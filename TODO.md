@@ -86,11 +86,12 @@ These need to be re-implemented **one at a time, one per 0.0.1 patch, each commi
 - **Implementation approach:** When a skippable event is active and Start is pressed, simulate the skip button click. First press: call whatever shows the skip button. Second press within 3 seconds: call whatever confirms the skip. Need to find the exact method — likely `Event.skipEvent()` or `Event.receiveLeftClick()` at the skip button coordinates.
 - **Next step:** Decompile or inspect `Event` class to find the skip mechanism. Look for `skippable`, `skipEvent`, `skipped` fields/methods.
 
-### 5b. Shop Inventory Tab Broken with Controller — FIXED in v2.8.9
+### 5b. Shop Inventory Tab Broken with Controller — IMPLEMENTED in v2.8.9 (UNTESTED)
 - Touch tab button disabled (snap methods don't work on Android ShopMenu). Tab switching now handled entirely by controller button (Y/X/Square depending on layout).
 - Prefix injects `receiveGamePadButton(Buttons.Y)` with bypass flag, fixing tab switching for all layouts (previously failed on Xbox/PS because vanilla got raw Buttons.X).
 - Controller button icon drawn on shop UI showing which button switches tabs.
 - Touch-triggered `inventoryVisible` changes are reverted in `Update_Postfix`.
+- **NEEDS TESTING:** Verify (1) touch button is blocked, (2) controller button icon appears, (3) tab switching works on all layouts, (4) selling still works normally on sell tab.
 
 ### 5c. Buy Quantity Bleeds to Sell Tab — FIXED in v2.7.14
 - **Symptom:** When on the sell tab, bumpers and triggers still adjust the buy quantity (`quantityToBuy` field). If the touch sell quantity dialog is open, triggers move both the sell dialog slider AND the buy quantity simultaneously.
