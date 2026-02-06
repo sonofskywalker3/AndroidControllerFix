@@ -37,6 +37,10 @@ namespace AndroidConsolizer.Patches
         private const int QuantityHoldDelay = 20;   // ~333ms at 60fps before repeat starts
         private const int QuantityRepeatRate = 3;   // ~50ms at 60fps between repeats
 
+        // Touch-triggered sell tab switch detection (5b fix)
+        private static bool _lastInventoryVisible;
+        private static bool _yPassedToVanilla;
+
 
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
@@ -120,6 +124,7 @@ namespace AndroidConsolizer.Patches
                             }
                         }
                     }
+                    _yPassedToVanilla = true;
                     return true; // Not on sell tab or no item — let vanilla handle Y (tab switching)
                 }
 
@@ -568,10 +573,33 @@ namespace AndroidConsolizer.Patches
             // Get gamepad state once for all hold-to-repeat checks
             var gpState = GamePad.GetState(PlayerIndex.One);
 
-            // NOTE: Right stick page navigation (5e) and sell tab snap fix (5b) were attempted
-            // but setCurrentlySnappedComponentTo/snapCursorToCurrentSnappedComponent don't work
-            // on Android's ShopMenu. These are vanilla Android controller bugs that need a
-            // different approach (possibly simulating button presses instead of calling snap methods).
+            // 5b fix: Detect touch-triggered sell tab switch and replay through vanilla's
+            // gamepad Y handler, which sets up snap navigation properly.
+            // Direct snap methods (setCurrentlySnappedComponentTo/snapCursorToCurrentSnappedComponent)
+            // don't work on Android's ShopMenu, so we simulate the Y button press instead.
+            if (InvVisibleField != null)
+            {
+                bool currentInventoryVisible = (bool)InvVisibleField.GetValue(__instance);
+                if (currentInventoryVisible && !_lastInventoryVisible)
+                {
+                    if (_yPassedToVanilla)
+                    {
+                        // Y-triggered switch — vanilla already set up snap nav, nothing to do
+                    }
+                    else
+                    {
+                        // Touch-triggered switch — undo and replay through vanilla's gamepad handler
+                        InvVisibleField.SetValue(__instance, false);
+                        __instance.receiveGamePadButton(Buttons.Y);
+                        currentInventoryVisible = (bool)InvVisibleField.GetValue(__instance);
+
+                        if (ModEntry.Config.VerboseLogging)
+                            Monitor.Log("5b fix: Touch-triggered sell tab switch replayed through gamepad Y handler", LogLevel.Debug);
+                    }
+                }
+                _yPassedToVanilla = false;
+                _lastInventoryVisible = currentInventoryVisible;
+            }
 
             // Y button sell hold-to-repeat
             if (_yHeldOnSellTab)
