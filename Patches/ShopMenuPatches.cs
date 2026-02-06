@@ -37,6 +37,9 @@ namespace AndroidConsolizer.Patches
         private const int QuantityHoldDelay = 20;   // ~333ms at 60fps before repeat starts
         private const int QuantityRepeatRate = 3;   // ~50ms at 60fps between repeats
 
+        // Track sell tab state for snap navigation fix (5b)
+        private static bool _wasOnSellTab = false;
+
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
         {
@@ -641,6 +644,22 @@ namespace AndroidConsolizer.Patches
                         QuantityToBuyField.SetValue(__instance, 1);
                     }
                 }
+
+                // Fix 5b: When switching to sell tab (via touch or any method), ensure snap navigation
+                // is set up on the inventory grid. Without this, touch-switching leaves controller
+                // navigation broken because snapToDefaultClickableComponent isn't called.
+                if (inventoryVisible && !_wasOnSellTab)
+                {
+                    // Just switched to sell tab — snap to first inventory slot
+                    if (__instance.inventory?.inventory != null && __instance.inventory.inventory.Count > 0)
+                    {
+                        __instance.setCurrentlySnappedComponentTo(__instance.inventory.inventory[0].myID);
+                        __instance.snapCursorToCurrentSnappedComponent();
+                        if (ModEntry.Config.VerboseLogging)
+                            Monitor.Log("Sell tab activated — snapped to first inventory slot", LogLevel.Debug);
+                    }
+                }
+                _wasOnSellTab = inventoryVisible;
             }
         }
 
