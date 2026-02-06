@@ -678,18 +678,34 @@ namespace AndroidConsolizer.Patches
         }
 
         /// <summary>
-        /// Get the label for the tab-switch button based on controller layout.
-        /// The tab-switch is the physical top button, which is Buttons.Y in the OS.
+        /// Draw a circle outline using Bresenham's midpoint circle algorithm.
         /// </summary>
-        private static string GetTabButtonLabel()
+        private static void DrawCircleOutline(SpriteBatch b, int cx, int cy, int radius, Color color, int thickness = 2)
         {
-            var layout = ModEntry.Config?.ControllerLayout ?? ControllerLayout.Switch;
-            return layout switch
+            int x = radius;
+            int y = 0;
+            int d = 1 - x;
+
+            while (y <= x)
             {
-                ControllerLayout.Switch => "X",
-                ControllerLayout.PlayStation => "\u25B3", // △
-                _ => "Y"
-            };
+                b.Draw(Game1.staminaRect, new Rectangle(cx + x, cy + y, thickness, thickness), color);
+                b.Draw(Game1.staminaRect, new Rectangle(cx - x, cy + y, thickness, thickness), color);
+                b.Draw(Game1.staminaRect, new Rectangle(cx + x, cy - y, thickness, thickness), color);
+                b.Draw(Game1.staminaRect, new Rectangle(cx - x, cy - y, thickness, thickness), color);
+                b.Draw(Game1.staminaRect, new Rectangle(cx + y, cy + x, thickness, thickness), color);
+                b.Draw(Game1.staminaRect, new Rectangle(cx - y, cy + x, thickness, thickness), color);
+                b.Draw(Game1.staminaRect, new Rectangle(cx + y, cy - x, thickness, thickness), color);
+                b.Draw(Game1.staminaRect, new Rectangle(cx - y, cy - x, thickness, thickness), color);
+
+                y++;
+                if (d <= 0)
+                    d += 2 * y + 1;
+                else
+                {
+                    x--;
+                    d += 2 * (y - x) + 1;
+                }
+            }
         }
 
         /// <summary>
@@ -703,26 +719,21 @@ namespace AndroidConsolizer.Patches
                 if (!ModEntry.Config?.EnableShopPurchaseFix ?? true)
                     return;
 
-                // Draw controller button icon on the inventoryButton
+                // Draw "Y" in a circle outline on the inventoryButton
                 if (GamePad.GetState(PlayerIndex.One).IsConnected && InventoryButtonField != null)
                 {
                     var invButton = InventoryButtonField.GetValue(__instance) as ClickableComponent;
                     if (invButton != null && invButton.bounds.Width > 0)
                     {
-                        string btnLabel = GetTabButtonLabel();
-                        Vector2 btnTextSize = Game1.smallFont.MeasureString(btnLabel);
-                        int btnPad = 8;
-                        int btnBoxW = (int)btnTextSize.X + btnPad * 2;
-                        int btnBoxH = (int)btnTextSize.Y + btnPad * 2;
+                        Vector2 ySize = Game1.smallFont.MeasureString("Y");
+                        int radius = (int)(Math.Max(ySize.X, ySize.Y) / 2) + 4;
 
-                        // Position at the right edge of the inventoryButton, vertically centered
-                        int btnBoxX = invButton.bounds.Right - btnBoxW - 4;
-                        int btnBoxY = invButton.bounds.Center.Y - btnBoxH / 2;
+                        int cx = invButton.bounds.Right - radius - 8;
+                        int cy = invButton.bounds.Center.Y;
 
-                        IClickableMenu.drawTextureBox(b, Game1.menuTexture, new Rectangle(0, 256, 60, 60),
-                            btnBoxX, btnBoxY, btnBoxW, btnBoxH, Color.White);
-                        Utility.drawTextWithShadow(b, btnLabel, Game1.smallFont,
-                            new Vector2(btnBoxX + btnPad, btnBoxY + btnPad),
+                        DrawCircleOutline(b, cx, cy, radius, Game1.textColor);
+                        Utility.drawTextWithShadow(b, "Y", Game1.smallFont,
+                            new Vector2(cx - ySize.X / 2, cy - ySize.Y / 2),
                             Game1.textColor);
                     }
                 }
