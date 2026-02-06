@@ -29,6 +29,14 @@ namespace AndroidConsolizer.Patches
         private const int SellHoldDelay = 20;   // ~333ms at 60fps before repeat starts
         private const int SellRepeatRate = 3;   // ~50ms at 60fps between repeats
 
+        // LB/RB quantity hold tracking (for hold-to-repeat)
+        private static bool _lbHeld;
+        private static bool _rbHeld;
+        private static int _lbHoldTicks;
+        private static int _rbHoldTicks;
+        private const int QuantityHoldDelay = 20;   // ~333ms at 60fps before repeat starts
+        private const int QuantityRepeatRate = 3;   // ~50ms at 60fps between repeats
+
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
         {
@@ -435,13 +443,115 @@ namespace AndroidConsolizer.Patches
             return true;
         }
 
+        /// <summary>
+        /// Adjust the buy quantity by the given delta, respecting all limits.
+        /// Called from ModEntry for initial LB/RB press, and from Update_Postfix for hold-to-repeat.
+        /// </summary>
+        public static void AdjustQuantity(ShopMenu shop, int delta)
+        {
+            try
+            {
+                if (QuantityToBuyField == null || InvVisibleField == null)
+                    return;
+
+                // Don't adjust quantity when on sell tab
+                if ((bool)InvVisibleField.GetValue(shop))
+                    return;
+
+                int currentQuantity = (int)QuantityToBuyField.GetValue(shop);
+
+                // Calculate max quantity based on selected item
+                int maxQuantity = GetMaxBuyQuantity(shop);
+
+                int newQuantity = Math.Max(1, Math.Min(maxQuantity, currentQuantity + delta));
+                if (newQuantity != currentQuantity)
+                {
+                    QuantityToBuyField.SetValue(shop, newQuantity);
+                    Game1.playSound("smallSelect");
+                    if (ModEntry.Config.VerboseLogging)
+                        Monitor.Log($"Shop quantity: {currentQuantity} -> {newQuantity} (max: {maxQuantity})", LogLevel.Debug);
+                }
+            }
+            catch (Exception ex)
+            {
+                Monitor.Log($"Error adjusting shop quantity: {ex.Message}", LogLevel.Error);
+            }
+        }
+
+        /// <summary>
+        /// Get the maximum quantity that can be purchased for the currently selected item.
+        /// Considers: stock, player money, trade items, and item stack size.
+        /// </summary>
+        private static int GetMaxBuyQuantity(ShopMenu shop)
+        {
+            try
+            {
+                // Find the currently selected item via hoveredItem
+                ISalable selectedItem = HoveredItemField?.GetValue(shop) as ISalable;
+
+                if (selectedItem == null || !shop.itemPriceAndStock.TryGetValue(selectedItem, out var priceAndStock))
+                    return 999; // Default max if we can't determine
+
+                int unitPrice = priceAndStock.Price;
+                int stock = priceAndStock.Stock;
+                int playerMoney = ShopMenu.getPlayerCurrencyAmount(Game1.player, shop.currency);
+                string tradeItem = priceAndStock.TradeItem;
+                int tradeItemCost = priceAndStock.TradeItemCount ?? 0;
+
+                // Max limited by stock
+                int maxByStock = stock == int.MaxValue ? 999 : stock;
+
+                // Max limited by money
+                int maxByMoney = unitPrice > 0 ? playerMoney / unitPrice : 999;
+
+                // Max limited by trade items (Desert Trader, etc.)
+                int maxByTradeItems = 999;
+                if (!string.IsNullOrEmpty(tradeItem) && tradeItemCost > 0)
+                {
+                    int playerTradeItems = 0;
+                    foreach (Item invItem in Game1.player.Items)
+                    {
+                        if (invItem != null && (invItem.QualifiedItemId == tradeItem || invItem.ItemId == tradeItem))
+                            playerTradeItems += invItem.Stack;
+                    }
+                    maxByTradeItems = playerTradeItems / tradeItemCost;
+                }
+
+                // Max limited by item stack size
+                int maxByStackSize = selectedItem.maximumStackSize();
+                if (maxByStackSize <= 0) maxByStackSize = 999;
+
+                return Math.Max(1, Math.Min(Math.Min(Math.Min(maxByStock, maxByMoney), maxByTradeItems), maxByStackSize));
+            }
+            catch
+            {
+                return 999; // Default max on error
+            }
+        }
+
+        /// <summary>Start tracking LB hold for repeat quantity adjustment.</summary>
+        public static void StartLBHold()
+        {
+            _lbHeld = true;
+            _lbHoldTicks = 0;
+        }
+
+        /// <summary>Start tracking RB hold for repeat quantity adjustment.</summary>
+        public static void StartRBHold()
+        {
+            _rbHeld = true;
+            _rbHoldTicks = 0;
+        }
+
         /// <summary>Postfix for update to handle held A button for continuous purchasing.</summary>
         private static void Update_Postfix(ShopMenu __instance, GameTime time)
         {
+            // Get gamepad state once for all hold-to-repeat checks
+            var gpState = GamePad.GetState(PlayerIndex.One);
+
             // Y button sell hold-to-repeat
             if (_yHeldOnSellTab)
             {
-                var gpState = GamePad.GetState(PlayerIndex.One);
                 bool yStillHeld = gpState.IsButtonDown(_yHoldRawButton);
                 bool stillOnSellTab = InvVisibleField != null && (bool)InvVisibleField.GetValue(__instance);
 
@@ -470,6 +580,51 @@ namespace AndroidConsolizer.Patches
                     _yHeldOnSellTab = false;
                     _yHoldTicks = 0;
                     _yHoldTargetItem = null;
+                }
+            }
+
+            // LB/RB quantity hold-to-repeat
+            bool onBuyTab = InvVisibleField == null || !(bool)InvVisibleField.GetValue(__instance);
+
+            if (_lbHeld)
+            {
+                bool lbStillHeld = gpState.IsButtonDown(Buttons.LeftShoulder);
+                if (lbStillHeld && onBuyTab)
+                {
+                    _lbHoldTicks++;
+                    if (_lbHoldTicks > QuantityHoldDelay &&
+                        (_lbHoldTicks - QuantityHoldDelay) % QuantityRepeatRate == 0)
+                    {
+                        // In bumper mode: -1, in non-bumper mode: -10
+                        int delta = ModEntry.Config.UseBumpersInsteadOfTriggers ? -1 : -10;
+                        AdjustQuantity(__instance, delta);
+                    }
+                }
+                else
+                {
+                    _lbHeld = false;
+                    _lbHoldTicks = 0;
+                }
+            }
+
+            if (_rbHeld)
+            {
+                bool rbStillHeld = gpState.IsButtonDown(Buttons.RightShoulder);
+                if (rbStillHeld && onBuyTab)
+                {
+                    _rbHoldTicks++;
+                    if (_rbHoldTicks > QuantityHoldDelay &&
+                        (_rbHoldTicks - QuantityHoldDelay) % QuantityRepeatRate == 0)
+                    {
+                        // In bumper mode: +1, in non-bumper mode: +10
+                        int delta = ModEntry.Config.UseBumpersInsteadOfTriggers ? 1 : 10;
+                        AdjustQuantity(__instance, delta);
+                    }
+                }
+                else
+                {
+                    _rbHeld = false;
+                    _rbHoldTicks = 0;
                 }
             }
 

@@ -316,6 +316,12 @@ namespace AndroidConsolizer
                 HandleShopBumperQuantity(e, shopMenu);
             }
 
+            // Shop quantity adjustment in non-bumper mode: LB/RB = +/-10
+            if (!Config.UseBumpersInsteadOfTriggers && Game1.activeClickableMenu is ShopMenu shopMenuNonBumper)
+            {
+                HandleShopQuantityNonBumper(e, shopMenuNonBumper);
+            }
+
             // Journal button - Start opens Quest Log during gameplay
             if (Config.EnableJournalButton && Game1.activeClickableMenu == null && Context.IsPlayerFree)
             {
@@ -363,52 +369,42 @@ namespace AndroidConsolizer
         /// <summary>Handle shop quantity adjustment with bumpers when triggers aren't available.</summary>
         private void HandleShopBumperQuantity(ButtonsChangedEventArgs e, ShopMenu shopMenu)
         {
-            try
+            // In bumper mode: LB/RB = +/-1
+            // LB - Decrease quantity by 1
+            if (e.Pressed.Contains(SButton.LeftShoulder))
             {
-                // Don't adjust buy quantity when on the sell tab
-                var invVisField = HarmonyLib.AccessTools.Field(typeof(ShopMenu), "inventoryVisible");
-                if (invVisField != null && (bool)invVisField.GetValue(shopMenu))
-                    return;
-
-                // Get the quantityToBuy field via reflection
-                var quantityField = HarmonyLib.AccessTools.Field(typeof(ShopMenu), "quantityToBuy");
-                if (quantityField == null)
-                {
-                    this.Monitor.Log("Could not find quantityToBuy field", LogLevel.Warn);
-                    return;
-                }
-
-                int currentQuantity = (int)quantityField.GetValue(shopMenu);
-
-                // LB - Decrease quantity
-                if (e.Pressed.Contains(SButton.LeftShoulder))
-                {
-                    this.Helper.Input.Suppress(SButton.LeftShoulder);
-                    int newQuantity = Math.Max(1, currentQuantity - 1);
-                    quantityField.SetValue(shopMenu, newQuantity);
-                    if (newQuantity != currentQuantity)
-                        Game1.playSound("smallSelect");
-                    if (Config.VerboseLogging)
-                        this.Monitor.Log($"Shop quantity: {currentQuantity} -> {newQuantity}", LogLevel.Debug);
-                }
-
-                // RB - Increase quantity
-                if (e.Pressed.Contains(SButton.RightShoulder))
-                {
-                    this.Helper.Input.Suppress(SButton.RightShoulder);
-                    // Get max quantity based on selected item's stock and player's money
-                    int maxQuantity = GetShopMaxQuantity(shopMenu);
-                    int newQuantity = Math.Min(maxQuantity, currentQuantity + 1);
-                    quantityField.SetValue(shopMenu, newQuantity);
-                    if (newQuantity != currentQuantity)
-                        Game1.playSound("smallSelect");
-                    if (Config.VerboseLogging)
-                        this.Monitor.Log($"Shop quantity: {currentQuantity} -> {newQuantity} (max: {maxQuantity})", LogLevel.Debug);
-                }
+                this.Helper.Input.Suppress(SButton.LeftShoulder);
+                Patches.ShopMenuPatches.AdjustQuantity(shopMenu, -1);
+                Patches.ShopMenuPatches.StartLBHold();
             }
-            catch (Exception ex)
+
+            // RB - Increase quantity by 1
+            if (e.Pressed.Contains(SButton.RightShoulder))
             {
-                this.Monitor.Log($"Error in shop bumper quantity: {ex.Message}", LogLevel.Error);
+                this.Helper.Input.Suppress(SButton.RightShoulder);
+                Patches.ShopMenuPatches.AdjustQuantity(shopMenu, 1);
+                Patches.ShopMenuPatches.StartRBHold();
+            }
+        }
+
+        /// <summary>Handle shop quantity adjustment in non-bumper mode: LB/RB = +/-10.</summary>
+        private void HandleShopQuantityNonBumper(ButtonsChangedEventArgs e, ShopMenu shopMenu)
+        {
+            // In non-bumper mode: LB/RB = +/-10
+            // LB - Decrease quantity by 10
+            if (e.Pressed.Contains(SButton.LeftShoulder))
+            {
+                this.Helper.Input.Suppress(SButton.LeftShoulder);
+                Patches.ShopMenuPatches.AdjustQuantity(shopMenu, -10);
+                Patches.ShopMenuPatches.StartLBHold();
+            }
+
+            // RB - Increase quantity by 10
+            if (e.Pressed.Contains(SButton.RightShoulder))
+            {
+                this.Helper.Input.Suppress(SButton.RightShoulder);
+                Patches.ShopMenuPatches.AdjustQuantity(shopMenu, 10);
+                Patches.ShopMenuPatches.StartRBHold();
             }
         }
 
