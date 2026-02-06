@@ -37,9 +37,10 @@ namespace AndroidConsolizer.Patches
         private const int QuantityHoldDelay = 20;   // ~333ms at 60fps before repeat starts
         private const int QuantityRepeatRate = 3;   // ~50ms at 60fps between repeats
 
-        // Touch-triggered sell tab switch detection (5b fix)
+        // 5b fix: touch tab button disabled, controller button icon shown instead
         private static bool _lastInventoryVisible;
         private static bool _yPassedToVanilla;
+        private static bool _forceTabSwitch;
 
 
         /// <summary>Apply Harmony patches.</summary>
@@ -92,6 +93,13 @@ namespace AndroidConsolizer.Patches
         {
             try
             {
+                // 5b: bypass flag — let vanilla handle the Y we're injecting for tab switch
+                if (_forceTabSwitch)
+                {
+                    _forceTabSwitch = false;
+                    return true;
+                }
+
                 Buttons remapped = ButtonRemapper.Remap(b);
 
                 // Only handle A and Y buttons — let everything else pass through
@@ -124,8 +132,13 @@ namespace AndroidConsolizer.Patches
                             }
                         }
                     }
+                    // Switch tabs by injecting Buttons.Y through vanilla's handler directly.
+                    // Can't just return true — on Xbox/PS layout, the raw button is X (not Y),
+                    // and vanilla only responds to Buttons.Y for tab switching.
                     _yPassedToVanilla = true;
-                    return true; // Not on sell tab or no item — let vanilla handle Y (tab switching)
+                    _forceTabSwitch = true;
+                    __instance.receiveGamePadButton(Buttons.Y);
+                    return false; // block vanilla from also processing the raw button
                 }
 
                 // Check sell mode via inventoryVisible field.
@@ -573,28 +586,27 @@ namespace AndroidConsolizer.Patches
             // Get gamepad state once for all hold-to-repeat checks
             var gpState = GamePad.GetState(PlayerIndex.One);
 
-            // 5b fix: Detect touch-triggered sell tab switch and replay through vanilla's
-            // gamepad Y handler, which sets up snap navigation properly.
-            // Direct snap methods (setCurrentlySnappedComponentTo/snapCursorToCurrentSnappedComponent)
-            // don't work on Android's ShopMenu, so we simulate the Y button press instead.
+            // 5b fix: Block touch-triggered tab switches. The touch inventory button
+            // toggles inventoryVisible but doesn't set up snap navigation, and direct snap
+            // methods don't work on Android's ShopMenu. Instead of trying to fix the touch
+            // path, disable it entirely and show a controller button icon hint.
             if (InvVisibleField != null)
             {
                 bool currentInventoryVisible = (bool)InvVisibleField.GetValue(__instance);
-                if (currentInventoryVisible && !_lastInventoryVisible)
+                if (currentInventoryVisible != _lastInventoryVisible)
                 {
                     if (_yPassedToVanilla)
                     {
-                        // Y-triggered switch — vanilla already set up snap nav, nothing to do
+                        // Gamepad-triggered switch — vanilla set up snap nav, allow it
                     }
                     else
                     {
-                        // Touch-triggered switch — undo and replay through vanilla's gamepad handler
-                        InvVisibleField.SetValue(__instance, false);
-                        __instance.receiveGamePadButton(Buttons.Y);
-                        currentInventoryVisible = (bool)InvVisibleField.GetValue(__instance);
+                        // Touch-triggered switch — revert it
+                        InvVisibleField.SetValue(__instance, _lastInventoryVisible);
+                        currentInventoryVisible = _lastInventoryVisible;
 
                         if (ModEntry.Config.VerboseLogging)
-                            Monitor.Log("5b fix: Touch-triggered sell tab switch replayed through gamepad Y handler", LogLevel.Debug);
+                            Monitor.Log("5b fix: Blocked touch-triggered tab switch", LogLevel.Debug);
                     }
                 }
                 _yPassedToVanilla = false;
@@ -698,9 +710,73 @@ namespace AndroidConsolizer.Patches
         }
 
         /// <summary>
-        /// Draw postfix — shows sell price tooltip when hovering items on the sell tab.
-        /// Redraws the tooltip on top of vanilla's (which has no price) with the sell price
-        /// added via moneyAmountToDisplayAtBottom, matching the buy tab's coin icon style.
+        /// Get the button label to display for the tab switch hint, based on controller layout.
+        /// Switch=Y (left button), Xbox=X (left button), PlayStation=Square (left button).
+        /// </summary>
+        private static string GetTabSwitchButtonLabel()
+        {
+            var layout = ModEntry.Config?.ControllerLayout ?? ControllerLayout.Switch;
+            return layout switch
+            {
+                ControllerLayout.Xbox => "X",
+                ControllerLayout.PlayStation => "\u25A1", // □ White Square
+                _ => "Y" // Switch/Odin
+            };
+        }
+
+        /// <summary>
+        /// Draw a controller button icon near the shop's tab area to indicate
+        /// which button switches between buy and sell tabs.
+        /// Positioned at the upper-right of the shop menu, near where the
+        /// inventory/sell tab button would be.
+        /// </summary>
+        private static void DrawTabSwitchIcon(ShopMenu shop, SpriteBatch b)
+        {
+            try
+            {
+                bool inventoryVisible = InvVisibleField != null && (bool)InvVisibleField.GetValue(shop);
+                string action = inventoryVisible ? "Buy" : "Sell";
+                string buttonLabel = GetTabSwitchButtonLabel();
+                string text = $" {buttonLabel}  {action}";
+
+                Vector2 textSize = Game1.smallFont.MeasureString(text);
+                int pad = 16;
+                int boxW = (int)textSize.X + pad * 2;
+                int boxH = (int)textSize.Y + pad * 2;
+
+                // Position at upper-right of shop menu, below the close button
+                int boxX = shop.xPositionOnScreen + shop.width - boxW;
+                int boxY = shop.yPositionOnScreen - boxH - 8;
+
+                // Keep on screen
+                if (boxX < 0) boxX = 0;
+                if (boxY < 0) boxY = 8;
+
+                IClickableMenu.drawTextureBox(b, Game1.menuTexture, new Rectangle(0, 256, 60, 60),
+                    boxX, boxY, boxW, boxH, Color.White, 1f, false);
+
+                // Draw button label in bold/highlight color, action text in normal color
+                Vector2 textPos = new Vector2(boxX + pad, boxY + pad);
+                string btnPart = $" {buttonLabel} ";
+                Vector2 btnSize = Game1.smallFont.MeasureString(btnPart);
+
+                // Draw button label with highlight
+                Utility.drawTextWithShadow(b, btnPart, Game1.smallFont, textPos, Color.Gold);
+                // Draw action text
+                Utility.drawTextWithShadow(b, $" {action}", Game1.smallFont,
+                    new Vector2(textPos.X + btnSize.X, textPos.Y), Game1.textColor);
+            }
+            catch
+            {
+                // Silently ignore draw errors
+            }
+        }
+
+        /// <summary>
+        /// Draw postfix — shows tab switch button icon and sell price tooltip.
+        /// The tab switch icon replaces the touch inventory button (which doesn't work
+        /// with controller snap navigation). Shows which controller button to press.
+        /// Also shows sell price tooltip when hovering items on the sell tab.
         /// </summary>
         private static void ShopMenu_Draw_Postfix(ShopMenu __instance, SpriteBatch b)
         {
@@ -711,6 +787,9 @@ namespace AndroidConsolizer.Patches
 
                 if (InvVisibleField == null)
                     return;
+
+                // 5b: Draw controller button icon for tab switching
+                DrawTabSwitchIcon(__instance, b);
 
                 bool inventoryVisible = (bool)InvVisibleField.GetValue(__instance);
                 if (!inventoryVisible)
