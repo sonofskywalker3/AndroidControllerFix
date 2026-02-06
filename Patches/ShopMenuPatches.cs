@@ -37,14 +37,8 @@ namespace AndroidConsolizer.Patches
         private const int QuantityHoldDelay = 20;   // ~333ms at 60fps before repeat starts
         private const int QuantityRepeatRate = 3;   // ~50ms at 60fps between repeats
 
-        // Track sell tab state for snap navigation fix (5b)
+        // Track sell tab state (for potential future fixes)
         private static bool _wasOnSellTab = false;
-
-        // Right stick page navigation (5e)
-        private static int _rightStickDebounce = 0;
-        private const int RightStickDebounceFrames = 12; // ~200ms at 60fps
-        private const int ItemsPerPage = 4; // Shop shows 4 items at a time
-        private const float RightStickThreshold = 0.5f;
 
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
@@ -558,64 +552,10 @@ namespace AndroidConsolizer.Patches
             // Get gamepad state once for all hold-to-repeat checks
             var gpState = GamePad.GetState(PlayerIndex.One);
 
-            // Right stick page navigation on buy tab (5e fix)
-            // Moves selection by one page instead of scrolling view (which desyncs from selection)
-            if (_rightStickDebounce > 0)
-                _rightStickDebounce--;
-
-            bool onBuyTabForRightStick = InvVisibleField == null || !(bool)InvVisibleField.GetValue(__instance);
-            if (onBuyTabForRightStick && _rightStickDebounce == 0)
-            {
-                float rightStickY = gpState.ThumbSticks.Right.Y;
-                if (Math.Abs(rightStickY) > RightStickThreshold)
-                {
-                    // Find current selection index in forSale list
-                    var snapped = __instance.currentlySnappedComponent;
-                    if (snapped != null && __instance.forSaleButtons != null && __instance.forSale != null)
-                    {
-                        int btnIndex = __instance.forSaleButtons.FindIndex(btn => btn.myID == snapped.myID);
-                        if (btnIndex >= 0)
-                        {
-                            int currentItemIndex = __instance.currentItemIndex + btnIndex;
-                            int newItemIndex;
-
-                            if (rightStickY > 0)
-                            {
-                                // Up - go back by one page
-                                newItemIndex = Math.Max(0, currentItemIndex - ItemsPerPage);
-                            }
-                            else
-                            {
-                                // Down - go forward by one page
-                                newItemIndex = Math.Min(__instance.forSale.Count - 1, currentItemIndex + ItemsPerPage);
-                            }
-
-                            if (newItemIndex != currentItemIndex)
-                            {
-                                // Calculate which button slot the new item should be in
-                                // Adjust currentItemIndex (scroll position) so the item is visible
-                                int maxScroll = Math.Max(0, __instance.forSale.Count - __instance.forSaleButtons.Count);
-                                int newScrollPos = Math.Max(0, Math.Min(maxScroll, newItemIndex - (newItemIndex % __instance.forSaleButtons.Count)));
-                                __instance.currentItemIndex = newScrollPos;
-
-                                // Snap to the button showing our target item
-                                int targetBtnIndex = newItemIndex - newScrollPos;
-                                if (targetBtnIndex >= 0 && targetBtnIndex < __instance.forSaleButtons.Count)
-                                {
-                                    __instance.setCurrentlySnappedComponentTo(__instance.forSaleButtons[targetBtnIndex].myID);
-                                    __instance.snapCursorToCurrentSnappedComponent();
-                                }
-
-                                Game1.playSound("shwip");
-                                _rightStickDebounce = RightStickDebounceFrames;
-
-                                if (ModEntry.Config.VerboseLogging)
-                                    Monitor.Log($"Right stick: item {currentItemIndex} -> {newItemIndex}, scroll {newScrollPos}", LogLevel.Debug);
-                            }
-                        }
-                    }
-                }
-            }
+            // NOTE: Right stick page navigation (5e) and sell tab snap fix (5b) were attempted
+            // but setCurrentlySnappedComponentTo/snapCursorToCurrentSnappedComponent don't work
+            // on Android's ShopMenu. These are vanilla Android controller bugs that need a
+            // different approach (possibly simulating button presses instead of calling snap methods).
 
             // Y button sell hold-to-repeat
             if (_yHeldOnSellTab)
@@ -710,20 +650,7 @@ namespace AndroidConsolizer.Patches
                     }
                 }
 
-                // Fix 5b: When switching to sell tab (via touch or any method), ensure snap navigation
-                // is set up on the inventory grid. Without this, touch-switching leaves controller
-                // navigation broken because snapToDefaultClickableComponent isn't called.
-                if (inventoryVisible && !_wasOnSellTab)
-                {
-                    // Just switched to sell tab — snap to first inventory slot
-                    if (__instance.inventory?.inventory != null && __instance.inventory.inventory.Count > 0)
-                    {
-                        __instance.setCurrentlySnappedComponentTo(__instance.inventory.inventory[0].myID);
-                        __instance.snapCursorToCurrentSnappedComponent();
-                        if (ModEntry.Config.VerboseLogging)
-                            Monitor.Log("Sell tab activated — snapped to first inventory slot", LogLevel.Debug);
-                    }
-                }
+                // Track sell tab state for potential future use
                 _wasOnSellTab = inventoryVisible;
             }
         }
@@ -751,15 +678,12 @@ namespace AndroidConsolizer.Patches
                 if (sellItem == null)
                     return;
 
-                int sellPrice;
-                if (sellItem is StardewValley.Object obj)
-                    sellPrice = obj.sellToStorePrice();
-                else
-                {
-                    int sp = sellItem.salePrice();
-                    sellPrice = sp > 0 ? sp / 2 : -1;
-                }
+                // Only show sell tooltip for Object items (crops, fish, minerals, etc.)
+                // Non-Object items (tools, weapons, rings, boots) can't be sold in shops
+                if (sellItem is not StardewValley.Object obj)
+                    return;
 
+                int sellPrice = obj.sellToStorePrice();
                 if (sellPrice <= 0)
                     return;
 
