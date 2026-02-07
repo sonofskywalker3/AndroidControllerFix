@@ -851,6 +851,19 @@ namespace AndroidConsolizer.Patches
                     }
                 }
 
+                // RB snaps cursor to Fill Stacks button (console-style shortcut)
+                if (remapped == Buttons.RightShoulder && ModEntry.Config.EnableChestTransferFix && !_colorPickerOpen)
+                {
+                    if (__instance.fillStacksButton != null)
+                    {
+                        __instance.currentlySnappedComponent = __instance.fillStacksButton;
+                        __instance.snapCursorToCurrentSnappedComponent();
+                        if (ModEntry.Config.VerboseLogging)
+                            Monitor.Log("[ChestTransfer] RB — snapped to Fill Stacks button", LogLevel.Debug);
+                        return false;
+                    }
+                }
+
                 // X button (after remapping) = Sort chest (and block the original to prevent deletion)
                 if (remapped == Buttons.X && ModEntry.Config.EnableSortFix)
                 {
