@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Chest Navigation Simulator — v2.9.7 Plan</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a1a; color: #eee; font-family: 'Segoe UI', system-ui, sans-serif; padding: 16px; }
+  h2 { margin-bottom: 4px; font-size: 20px; }
+  .sub { color: #888; font-size: 12px; margin-bottom: 12px; }
+
+  .main { display: flex; gap: 16px; align-items: flex-start; }
+
+  /* Game area */
+  .game-area {
+    position: relative;
+    width: 820px;
+    height: 480px;
+    background: #2d1f0e;
+    border: 3px solid #5c3a1e;
+    border-radius: 6px;
+    overflow: hidden;
+    outline: none;
+  }
+  .game-area:focus { border-color: #fa0; }
+
+  /* Section panels */
+  .section-panel {
+    position: absolute;
+    background: rgba(210,180,120,0.12);
+    border: 2px solid rgba(140,110,70,0.5);
+    border-radius: 4px;
+  }
+  .section-label {
+    position: absolute;
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(210,180,120,0.6);
+    letter-spacing: 0.5px;
+  }
+
+  /* Grid slots */
+  .slot {
+    position: absolute;
+    background: rgba(180,150,90,0.18);
+    border: 1px solid rgba(180,150,90,0.3);
+    border-radius: 2px;
+    font-size: 7px;
+    color: rgba(255,255,255,0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .slot.rightmost {
+    border-color: rgba(255,170,0,0.4);
+    background: rgba(255,170,0,0.08);
+  }
+
+  /* Sidebar buttons */
+  .sidebar-btn {
+    position: absolute;
+    border: 2px solid;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+  .sidebar-btn.chest-side { border-color: #0a8a5a; background: rgba(10,138,90,0.2); color: #2dca8a; }
+  .sidebar-btn.player-side { border-color: #3366cc; background: rgba(51,102,204,0.15); color: #6699ee; }
+  .sidebar-btn.close-btn { border-color: #cc3333; background: rgba(204,51,51,0.15); color: #ff6666; }
+
+  /* Color swatches */
+  .swatch {
+    position: absolute;
+    border: 2px solid rgba(0,0,0,0.3);
+    border-radius: 3px;
+    font-size: 8px;
+    color: rgba(0,0,0,0.5);
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Cursor */
+  .cursor {
+    position: absolute;
+    border: 3px solid #fff;
+    border-radius: 4px;
+    pointer-events: none;
+    z-index: 100;
+    box-shadow: 0 0 12px rgba(255,255,255,0.6), inset 0 0 8px rgba(255,255,255,0.15);
+    transition: left 0.08s ease-out, top 0.08s ease-out, width 0.08s ease-out, height 0.08s ease-out;
+  }
+  .cursor.flash { box-shadow: 0 0 20px rgba(255,200,0,0.9), inset 0 0 12px rgba(255,200,0,0.3); border-color: #ffcc00; }
+
+  /* Side panel */
+  .info-panel {
+    width: 310px;
+    font-size: 12px;
+  }
+  .info-panel h3 { color: #fa0; font-size: 14px; margin: 10px 0 4px; }
+  .info-panel h3:first-child { margin-top: 0; }
+
+  .status-box {
+    background: #111;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 10px;
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    min-height: 120px;
+    white-space: pre-wrap;
+  }
+
+  .key-help {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    gap: 2px 8px;
+    font-size: 12px;
+    margin: 6px 0;
+  }
+  .key { color: #fa0; font-weight: bold; font-family: monospace; }
+
+  .nav-line {
+    display: grid;
+    grid-template-columns: 22px 1fr;
+    gap: 2px 4px;
+    font-size: 12px;
+    margin: 1px 0;
+  }
+  .nav-arrow { color: #888; font-weight: bold; text-align: center; }
+  .nav-target { color: #ccc; }
+  .nav-none { color: #555; }
+
+  .picker-status {
+    padding: 4px 8px;
+    border-radius: 3px;
+    font-weight: bold;
+    display: inline-block;
+    margin: 4px 0;
+  }
+  .picker-open { background: #0a3a0a; color: #0c8; border: 1px solid #0c8; }
+  .picker-closed { background: #1a1a1a; color: #666; border: 1px solid #444; }
+
+  .action-log {
+    background: #0a0a0a;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-family: monospace;
+    font-size: 11px;
+    max-height: 100px;
+    overflow-y: auto;
+    color: #888;
+    line-height: 1.4;
+  }
+  .action-log .action { color: #fc0; }
+</style>
+</head>
+<body>
+
+<h2>Chest Navigation Simulator</h2>
+<p class="sub">Click the game area, then use arrow keys to navigate, Enter=A button, Escape=B button. This simulates the v2.9.7 fix plan.</p>
+
+<div class="main">
+  <div class="game-area" id="game" tabindex="0"></div>
+  <div class="info-panel">
+    <h3>Controls</h3>
+    <div class="key-help">
+      <span class="key">Arrows</span><span>Navigate (D-pad/stick)</span>
+      <span class="key">Enter</span><span>A button (activate)</span>
+      <span class="key">Escape</span><span>B button (back/close)</span>
+    </div>
+
+    <h3>Current Component</h3>
+    <div class="status-box" id="status">Click the game area to start.</div>
+
+    <h3>Navigation</h3>
+    <div id="nav-info"></div>
+
+    <h3>Color Picker</h3>
+    <div id="picker-status"></div>
+
+    <h3>Action Log</h3>
+    <div class="action-log" id="log"></div>
+  </div>
+</div>
+
+<script>
+// ==============================
+// SCALE & LAYOUT
+// ==============================
+const S = 0.55;
+const OX = 5, OY = 5;
+function gx(x) { return x * S + OX; }
+function gy(y) { return y * S + OY; }
+function gw(w) { return w * S; }
+function gh(h) { return h * S; }
+
+// ==============================
+// NODES - every navigable component
+// ==============================
+const nodes = {};
+
+// --- Chest grid (12x3) ---
+for (let row = 0; row < 3; row++) {
+  for (let col = 0; col < 12; col++) {
+    const id = 53910 + row * 12 + col;
+    nodes[id] = {
+      id, section: 'chest-grid', row, col,
+      x: 44 + col * 103, y: 66 + row * 110, w: 103, h: 110,
+      label: '', displayName: `Chest slot [${row},${col}]`,
+      rightmost: col === 11
+    };
+  }
+}
+
+// --- Player grid (12x3) ---
+for (let row = 0; row < 3; row++) {
+  for (let col = 0; col < 12; col++) {
+    const id = row * 12 + col;
+    nodes[id] = {
+      id, section: 'player-grid', row, col,
+      x: 63 + col * 103, y: 471 + row * 110, w: 103, h: 110,
+      label: '', displayName: `Player slot [${row},${col}]`,
+      rightmost: col === 11
+    };
+  }
+}
+
+// --- Sidebar buttons ---
+nodes['sort_chest'] = {
+  id: 'sort_chest', realId: 106, section: 'sidebar-chest',
+  x: 1342, y: 86, w: 64, h: 64,
+  label: 'SORT\nCHEST', displayName: 'Sort Chest (organizeButton, ID=106)',
+  cssClass: 'chest-side'
+};
+nodes['fill_stacks'] = {
+  id: 'fill_stacks', realId: 12952, section: 'sidebar-chest',
+  x: 1342, y: 195, w: 64, h: 64,
+  label: 'FILL\nSTACKS', displayName: 'Fill Stacks (ID=12952)',
+  cssClass: 'chest-side'
+};
+nodes['color_toggle'] = {
+  id: 'color_toggle', realId: 27346, section: 'sidebar-chest',
+  x: 1342, y: 305, w: 64, h: 64,
+  label: 'COLOR\nPICKER', displayName: 'Color Picker Toggle (ID=27346)',
+  cssClass: 'chest-side'
+};
+nodes['sort_inv'] = {
+  id: 'sort_inv', realId: 106, section: 'sidebar-player',
+  x: 1351, y: 471, w: 64, h: 64,
+  label: 'SORT\nINV', displayName: 'Sort Inventory (organizeButton, ID=106)',
+  cssClass: 'player-side'
+};
+nodes['trash_player'] = {
+  id: 'trash_player', realId: 105, section: 'sidebar-player',
+  x: 1351, y: 630, w: 64, h: 110,
+  label: 'TRASH\nCAN', displayName: 'Trash Can — Player (ID=105)',
+  cssClass: 'player-side'
+};
+nodes['close_x'] = {
+  id: 'close_x', realId: -500, section: 'sidebar-close',
+  x: 1401, y: 15, w: 60, h: 60,
+  label: 'X', displayName: 'Close Button (ID=-500)',
+  cssClass: 'close-btn'
+};
+
+// --- Color swatches (7x3 = 21) ---
+const swatchColors = [
+  '#8B6F47','#5555cc','#66bbff','#009999','#00ccaa','#228B22','#99cc00',
+  '#ffcc00','#ff8800','#ff4400','#cc0000','#880044','#ffaacc','#ff44cc',
+  '#9933cc','#6600aa','#333388','#555555','#888888','#bbbbbb','#ffffff'
+];
+for (let i = 0; i < 21; i++) {
+  const row = Math.floor(i / 7);
+  const col = i % 7;
+  const id = 4343 + i;
+  nodes[`swatch_${id}`] = {
+    id: `swatch_${id}`, realId: id, section: 'swatch',
+    row, col,
+    // Visual position in 7x3 grid overlaying chest area
+    x: 48 + col * 88, y: 80 + row * 88, w: 80, h: 80,
+    label: `${i}`, displayName: `Color swatch #${i} (ID=${id})`,
+    color: swatchColors[i],
+    hidden: true // start hidden
+  };
+}
+
+// ==============================
+// WIRING - navigation connections
+// ==============================
+
+// Chest grid internal
+for (let row = 0; row < 3; row++) {
+  for (let col = 0; col < 12; col++) {
+    const id = 53910 + row * 12 + col;
+    const n = nodes[id];
+    n.left = col > 0 ? 53910 + row * 12 + (col - 1) : null;
+    n.right = col < 11 ? 53910 + row * 12 + (col + 1) : null;
+    n.up = row > 0 ? 53910 + (row - 1) * 12 + col : null;
+    n.down = row < 2 ? 53910 + (row + 1) * 12 + col : col; // chest row 2 down → player row 0 same col
+  }
+}
+// Chest rightmost → sidebar
+nodes[53921].right = 'sort_chest';
+nodes[53933].right = 'fill_stacks';
+nodes[53945].right = 'color_toggle';
+
+// Player grid internal
+for (let row = 0; row < 3; row++) {
+  for (let col = 0; col < 12; col++) {
+    const id = row * 12 + col;
+    const n = nodes[id];
+    n.left = col > 0 ? row * 12 + (col - 1) : null;
+    n.right = col < 11 ? row * 12 + (col + 1) : null;
+    n.up = row > 0 ? (row - 1) * 12 + col : 53934 + col; // player row 0 up → chest row 2 same col
+    n.down = row < 2 ? (row + 1) * 12 + col : null;
+  }
+}
+// Player rightmost → sidebar
+nodes[11].right = 'sort_inv';
+nodes[23].right = 'trash_player';
+nodes[35].right = 'trash_player';
+
+// Sidebar wiring
+nodes['sort_chest'].up = 53921;  // chest row 0 rightmost (user specified)
+nodes['sort_chest'].down = 'fill_stacks';
+nodes['sort_chest'].left = 53921;
+nodes['sort_chest'].right = 'close_x';
+
+nodes['fill_stacks'].up = 'sort_chest';
+nodes['fill_stacks'].down = 'color_toggle';
+nodes['fill_stacks'].left = 53933;
+nodes['fill_stacks'].right = null;
+
+nodes['color_toggle'].up = 'fill_stacks';
+nodes['color_toggle'].down = 'sort_inv';
+nodes['color_toggle'].left = 53945;
+nodes['color_toggle'].right = null;
+
+nodes['sort_inv'].up = 'color_toggle';
+nodes['sort_inv'].down = 'trash_player';
+nodes['sort_inv'].left = 11;
+nodes['sort_inv'].right = null;
+
+nodes['trash_player'].up = 'sort_inv';
+nodes['trash_player'].down = 35;  // wraps to player bottom-right (user specified)
+nodes['trash_player'].left = 23;
+nodes['trash_player'].right = null;
+
+nodes['close_x'].up = null;
+nodes['close_x'].down = 'sort_chest';
+nodes['close_x'].left = 'sort_chest';
+nodes['close_x'].right = null;
+
+// Swatch grid wiring (7x3)
+for (let i = 0; i < 21; i++) {
+  const row = Math.floor(i / 7);
+  const col = i % 7;
+  const key = `swatch_${4343 + i}`;
+  const n = nodes[key];
+  n.left = col > 0 ? `swatch_${4343 + i - 1}` : null;
+  n.right = col < 6 ? `swatch_${4343 + i + 1}` : null;
+  n.up = row > 0 ? `swatch_${4343 + i - 7}` : null;
+  n.down = row < 2 ? `swatch_${4343 + i + 7}` : null;
+}
+
+// ==============================
+// STATE
+// ==============================
+let currentNode = 53910; // start at chest top-left
+let colorPickerOpen = false;
+let flashTimeout = null;
+
+// ==============================
+// RENDERING
+// ==============================
+const game = document.getElementById('game');
+const statusEl = document.getElementById('status');
+const navEl = document.getElementById('nav-info');
+const pickerEl = document.getElementById('picker-status');
+const logEl = document.getElementById('log');
+
+function render() {
+  game.innerHTML = '';
+
+  // Section panels
+  addPanel(30, 55, 1270, 345, 'Chest Inventory');
+  addPanel(50, 458, 1270, 345, 'Player Inventory');
+
+  // Color picker overlay background (when open)
+  if (colorPickerOpen) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `position:absolute;left:${gx(28)}px;top:${gy(68)}px;width:${gw(640)}px;height:${gh(280)}px;background:rgba(180,150,90,0.85);border:2px solid #8B6F47;border-radius:4px;z-index:10;`;
+    game.appendChild(overlay);
+  }
+
+  // Render components
+  for (const key in nodes) {
+    const n = nodes[key];
+    if (n.hidden && !colorPickerOpen) continue;
+    if (n.section === 'swatch' && !colorPickerOpen) continue;
+
+    // Hide grid slots when color picker covers them
+    if (colorPickerOpen && n.section === 'chest-grid') {
+      // Still render but dim
+      renderSlot(n, true);
+      continue;
+    }
+
+    if (n.section === 'chest-grid' || n.section === 'player-grid') {
+      renderSlot(n, false);
+    } else if (n.section === 'swatch') {
+      renderSwatch(n);
+    } else {
+      renderSidebarBtn(n);
+    }
+  }
+
+  // Cursor
+  const cur = nodes[currentNode];
+  if (cur) {
+    const cursor = document.createElement('div');
+    cursor.className = 'cursor';
+    cursor.id = 'cursor';
+    cursor.style.left = (gx(cur.x) - 3) + 'px';
+    cursor.style.top = (gy(cur.y) - 3) + 'px';
+    cursor.style.width = (gw(cur.w) + 6) + 'px';
+    cursor.style.height = (gh(cur.h) + 6) + 'px';
+    if (cur.section === 'swatch') cursor.style.zIndex = '110';
+    game.appendChild(cursor);
+  }
+
+  updateStatus();
+}
+
+function addPanel(x, y, w, h, label) {
+  const panel = document.createElement('div');
+  panel.className = 'section-panel';
+  panel.style.cssText = `left:${gx(x)}px;top:${gy(y)}px;width:${gw(w)}px;height:${gh(h)}px;`;
+  game.appendChild(panel);
+  const lbl = document.createElement('div');
+  lbl.className = 'section-label';
+  lbl.style.cssText = `left:${gx(x) + 4}px;top:${gy(y) - 14}px;`;
+  lbl.textContent = label;
+  game.appendChild(lbl);
+}
+
+function renderSlot(n, dimmed) {
+  const el = document.createElement('div');
+  el.className = 'slot' + (n.rightmost ? ' rightmost' : '');
+  el.style.left = gx(n.x) + 'px';
+  el.style.top = gy(n.y) + 'px';
+  el.style.width = gw(n.w) + 'px';
+  el.style.height = gh(n.h) + 'px';
+  if (dimmed) el.style.opacity = '0.2';
+  if (n.rightmost) {
+    el.style.fontSize = '8px';
+    el.style.color = 'rgba(255,170,0,0.5)';
+    el.textContent = n.id;
+  }
+  game.appendChild(el);
+}
+
+function renderSwatch(n) {
+  const el = document.createElement('div');
+  el.className = 'swatch';
+  el.style.left = gx(n.x) + 'px';
+  el.style.top = gy(n.y) + 'px';
+  el.style.width = gw(n.w) + 'px';
+  el.style.height = gh(n.h) + 'px';
+  el.style.background = n.color;
+  el.style.zIndex = '20';
+  el.textContent = n.label;
+  game.appendChild(el);
+}
+
+function renderSidebarBtn(n) {
+  const el = document.createElement('div');
+  el.className = 'sidebar-btn ' + (n.cssClass || '');
+  el.style.left = gx(n.x) + 'px';
+  el.style.top = gy(n.y) + 'px';
+  el.style.width = gw(n.w) + 'px';
+  el.style.height = gh(n.h) + 'px';
+  el.innerHTML = (n.label || '').replace(/\n/g, '<br>');
+  game.appendChild(el);
+}
+
+function updateStatus() {
+  const n = nodes[currentNode];
+  if (!n) { statusEl.textContent = 'No component selected'; return; }
+
+  let text = n.displayName + '\n';
+  if (n.realId !== undefined) text += `Game ID: ${n.realId}\n`;
+  text += `Position: X:${n.x} Y:${n.y} (${n.w}x${n.h})\n`;
+  if (n.section === 'chest-grid') text += `Grid: chest row ${n.row}, col ${n.col}`;
+  if (n.section === 'player-grid') text += `Grid: player row ${n.row}, col ${n.col}`;
+  if (n.section === 'swatch') text += `Swatch: row ${n.row}, col ${n.col}`;
+  statusEl.textContent = text;
+
+  // Nav info
+  const dirs = ['up', 'down', 'left', 'right'];
+  let navHtml = '';
+  dirs.forEach(dir => {
+    const target = n[dir];
+    const arrow = {up:'↑', down:'↓', left:'←', right:'→'}[dir];
+    let targetName = '';
+    let cls = 'nav-none';
+    if (target != null && nodes[target]) {
+      targetName = nodes[target].displayName || nodes[target].id;
+      cls = 'nav-target';
+    } else {
+      targetName = '(nothing)';
+    }
+    navHtml += `<div class="nav-line"><span class="nav-arrow">${arrow}</span><span class="${cls}">${targetName}</span></div>`;
+  });
+
+  // A button action
+  let aAction = '(no action)';
+  if (n.id === 'color_toggle') aAction = colorPickerOpen ? 'Close color picker' : 'Open color picker → swatch 0';
+  else if (n.id === 'sort_chest') aAction = 'Sort chest contents';
+  else if (n.id === 'fill_stacks') aAction = 'Add to existing stacks';
+  else if (n.id === 'sort_inv') aAction = 'Sort player inventory';
+  else if (n.id === 'trash_player') aAction = 'Delete held item';
+  else if (n.id === 'close_x') aAction = 'Close chest menu';
+  else if (n.section === 'swatch') aAction = `Select color #${n.label}`;
+  else if (n.section === 'chest-grid') aAction = 'Pick up / place item (chest)';
+  else if (n.section === 'player-grid') aAction = 'Pick up / place item (inventory)';
+  navHtml += `<div class="nav-line" style="margin-top:4px"><span class="nav-arrow" style="color:#0c8">A</span><span class="nav-target" style="color:#0c8">${aAction}</span></div>`;
+  navEl.innerHTML = navHtml;
+
+  // Picker status
+  pickerEl.innerHTML = colorPickerOpen
+    ? '<span class="picker-status picker-open">OPEN — swatches visible</span>'
+    : '<span class="picker-status picker-closed">CLOSED</span>';
+}
+
+function addLog(msg) {
+  const line = document.createElement('div');
+  line.innerHTML = msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function flashCursor() {
+  const cursor = document.getElementById('cursor');
+  if (cursor) {
+    cursor.classList.add('flash');
+    clearTimeout(flashTimeout);
+    flashTimeout = setTimeout(() => cursor.classList.remove('flash'), 200);
+  }
+}
+
+// ==============================
+// INPUT HANDLING
+// ==============================
+function navigate(dir) {
+  const n = nodes[currentNode];
+  if (!n) return;
+
+  // In color picker mode, swatch navigation takes over for chest area
+  const target = n[dir];
+  if (target != null && nodes[target]) {
+    // Don't navigate into swatches when picker is closed
+    if (nodes[target].section === 'swatch' && !colorPickerOpen) return;
+    // Don't navigate into dimmed chest grid when picker is open
+    if (colorPickerOpen && nodes[target].section === 'chest-grid') return;
+
+    currentNode = target;
+    addLog(`${dir.toUpperCase()} → ${nodes[target].displayName}`);
+  }
+  render();
+}
+
+function pressA() {
+  const n = nodes[currentNode];
+  if (!n) return;
+  flashCursor();
+
+  if (n.id === 'color_toggle') {
+    colorPickerOpen = !colorPickerOpen;
+    if (colorPickerOpen) {
+      currentNode = 'swatch_4343';
+      addLog('<span class="action">A on Color Toggle → OPENED picker, cursor → swatch 0</span>');
+    } else {
+      addLog('<span class="action">A on Color Toggle → CLOSED picker</span>');
+    }
+  } else if (n.id === 'sort_chest') {
+    addLog('<span class="action">A → Sort chest contents!</span>');
+  } else if (n.id === 'fill_stacks') {
+    addLog('<span class="action">A → Fill existing stacks!</span>');
+  } else if (n.id === 'sort_inv') {
+    addLog('<span class="action">A → Sort player inventory!</span>');
+  } else if (n.id === 'trash_player') {
+    addLog('<span class="action">A → Trash held item!</span>');
+  } else if (n.id === 'close_x') {
+    addLog('<span class="action">A → Close chest menu!</span>');
+  } else if (n.section === 'swatch') {
+    addLog(`<span class="action">A → Selected color #${n.label}!</span>`);
+  } else {
+    addLog(`A on ${n.displayName}`);
+  }
+  render();
+}
+
+function pressB() {
+  if (colorPickerOpen) {
+    colorPickerOpen = false;
+    currentNode = 'color_toggle';
+    addLog('<span class="action">B → Closed color picker, cursor → Color Toggle</span>');
+  } else {
+    addLog('<span class="action">B → Close chest menu</span>');
+  }
+  render();
+}
+
+game.addEventListener('keydown', (e) => {
+  e.preventDefault();
+  switch (e.key) {
+    case 'ArrowUp': navigate('up'); break;
+    case 'ArrowDown': navigate('down'); break;
+    case 'ArrowLeft': navigate('left'); break;
+    case 'ArrowRight': navigate('right'); break;
+    case 'Enter': pressA(); break;
+    case 'Escape': pressB(); break;
+  }
+});
+
+game.addEventListener('click', () => game.focus());
+
+// Initial render
+render();
+game.focus();
+addLog('Chest opened. Cursor at chest slot [0,0].');
+</script>
+
+</body>
+</html>
