@@ -324,7 +324,10 @@ These need to be re-implemented **one at a time, one per 0.0.1 patch, each commi
 - Must stop completely to use upgraded tools
 - On Switch/PC, tools can be used while walking
 - May be engine-level Android difference
-- UNVERIFIED on Odin Pro - no upgraded tools yet in current playthrough
+- **Confirmed reproducible (v2.9.1 testing):** If walking and start holding the tool button, player stops moving and tool fires rapid-fire single uses instead of charging. This is NOT the same bug as #25 (which was intra-frame inconsistency fixed by caching).
+- **Switch comparison confirmed:** On Switch, starting to hold the charge button while moving begins charging immediately. Continuing to hold both charge button and joystick causes the player to hop one square at a time while charging. This hop-while-charging behavior is likely deep in the engine's tool-use state machine.
+- **Root cause hypothesis:** Android port's tool-use code path likely requires the player to be stationary before it enters the "charging" state. When movement stick is held, it falls back to repeated single-use instead. The hop-one-square behavior on Switch suggests the engine has a specific "charging while moving" mode that Android may have stripped.
+- **Deferred:** Complex engine-level investigation with uncertain scope. Prioritizing #10+#13 (chest navigation) and #7 (chest transfer) instead.
 - **Testing plan:** For each tool (Axe, Pickaxe, Hoe, Watering Can), at each upgrade level (Copper, Steel, Gold, Iridium):
   - Test basic use while stationary (Y button)
   - Test basic use while walking (hold direction + Y)

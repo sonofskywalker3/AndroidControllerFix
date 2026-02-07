@@ -60,6 +60,9 @@ namespace AndroidConsolizer
         /// <summary>Whether to enable Y button add-to-stacks (in chest).</summary>
         public bool EnableAddToStacksFix { get; set; } = true;
 
+        /// <summary>Whether to enable chest navigation fix (trash can, sort button, color picker reachable via controller).</summary>
+        public bool EnableChestNavFix { get; set; } = true;
+
         /// <summary>Whether to enable shipping bin stacking fix (A button adds to existing stacks).</summary>
         public bool EnableShippingBinFix { get; set; } = true;
 

@@ -120,6 +120,12 @@ namespace AndroidConsolizer
                 Patches.FishingRodPatches.ClearSelection();
             }
 
+            // Fix snap navigation in ItemGrabMenu (chests, fishing treasure, etc.)
+            if (Config.EnableChestNavFix && e.NewMenu is ItemGrabMenu itemGrabMenu)
+            {
+                Patches.ItemGrabMenuPatches.FixSnapNavigation(itemGrabMenu);
+            }
+
             // Track CarpenterMenu open/close for grace period fix
             if (e.NewMenu is CarpenterMenu)
             {
@@ -935,6 +941,14 @@ namespace AndroidConsolizer
                 tooltip: () => "Y button adds matching items to existing stacks in chest",
                 getValue: () => Config.EnableAddToStacksFix,
                 setValue: value => Config.EnableAddToStacksFix = value
+            );
+
+            configMenu.AddBoolOption(
+                mod: this.ModManifest,
+                name: () => "Enable Chest Navigation Fix",
+                tooltip: () => "Makes trash can, sort button, color picker, and fill stacks reachable via controller in chests",
+                getValue: () => Config.EnableChestNavFix,
+                setValue: value => Config.EnableChestNavFix = value
             );
 
             configMenu.AddBoolOption(
