@@ -216,7 +216,7 @@ namespace AndroidConsolizer.Patches
                 {
                     sortChest.leftNeighborID = chestRow0Right?.myID ?? sortChest.leftNeighborID;
                     sortChest.rightNeighborID = closeX?.myID ?? sortChest.rightNeighborID;
-                    sortChest.upNeighborID = chestRow0Right?.myID ?? sortChest.upNeighborID;
+                    sortChest.upNeighborID = closeX?.myID ?? sortChest.upNeighborID;
                     sortChest.downNeighborID = fillStacks?.myID ?? sortChest.downNeighborID;
                     _sideButtonObjects.Add(sortChest);
                 }
