@@ -21,10 +21,10 @@ namespace AndroidConsolizer.Patches
         private static FieldInfo HoveredItemField;
         private static FieldInfo QuantityToBuyField;
         private static FieldInfo InventoryButtonField;
-        private static FieldInfo CurrentItemIndexField;
 
-        // Saved state for blocking vanilla right stick scroll
-        private static int _savedCurrentItemIndex;
+
+        // Flag read by GameplayButtonPatches.GetState_Postfix to zero right stick on shop buy tab
+        internal static bool SuppressRightStick;
 
         // Y button sell-one hold tracking
         private static bool _yHeldOnSellTab;
@@ -62,7 +62,7 @@ namespace AndroidConsolizer.Patches
             HoveredItemField = AccessTools.Field(typeof(ShopMenu), "hoveredItem");
             QuantityToBuyField = AccessTools.Field(typeof(ShopMenu), "quantityToBuy");
             InventoryButtonField = AccessTools.Field(typeof(ShopMenu), "inventoryButton");
-            CurrentItemIndexField = AccessTools.Field(typeof(ShopMenu), "currentItemIndex");
+
 
             try
             {
@@ -616,12 +616,11 @@ namespace AndroidConsolizer.Patches
             _rbHoldTicks = 0;
         }
 
-        /// <summary>Postfix for update to handle held A button for continuous purchasing.</summary>
-        /// <summary>Prefix for update — saves currentItemIndex before vanilla can scroll it via right stick.</summary>
+        /// <summary>Prefix for update — sets SuppressRightStick flag so GamePad.GetState zeroes right stick on buy tab.</summary>
         private static void Update_Prefix(ShopMenu __instance)
         {
-            if (CurrentItemIndexField != null)
-                _savedCurrentItemIndex = (int)CurrentItemIndexField.GetValue(__instance);
+            bool onBuyTab = InvVisibleField == null || !(bool)InvVisibleField.GetValue(__instance);
+            SuppressRightStick = onBuyTab;
         }
 
         /// <summary>Postfix for update — hold-to-repeat, right stick navigation, quantity reset.</summary>
@@ -710,18 +709,15 @@ namespace AndroidConsolizer.Patches
             }
 
             // Right stick navigation — jump 5 items at a time on buy tab.
-            // Vanilla right stick scrolls the view (currentItemIndex) without moving selection.
-            // We undo vanilla's scroll (restore saved currentItemIndex) and instead simulate
-            // DPad presses which move both selection AND view together.
+            // Vanilla right stick scroll is blocked at the source via SuppressRightStick flag
+            // in GameplayButtonPatches.GetState_Postfix (zeroes out right thumbstick for vanilla).
+            // We read the REAL right stick from the raw hardware state cached during GetState_Postfix,
+            // then simulate DPad presses which move both selection AND view together.
             if (onBuyTab)
             {
-                float rsY = gpState.ThumbSticks.Right.Y;
+                float rsY = GameplayButtonPatches.RawRightStickY;
                 bool stickDown = rsY < -RStickThreshold;
                 bool stickUp = rsY > RStickThreshold;
-
-                // Undo vanilla's right stick scroll whenever stick is active
-                if ((stickDown || stickUp) && CurrentItemIndexField != null)
-                    CurrentItemIndexField.SetValue(__instance, _savedCurrentItemIndex);
 
                 if (stickDown || stickUp)
                 {
@@ -767,8 +763,11 @@ namespace AndroidConsolizer.Patches
                         QuantityToBuyField.SetValue(__instance, 1);
                     }
                 }
-
             }
+
+            // Clear suppression flag after our postfix runs — ensures it's only active
+            // between prefix and postfix of ShopMenu.update, not during draw/other frames
+            SuppressRightStick = false;
         }
 
         /// <summary>
@@ -824,7 +823,7 @@ namespace AndroidConsolizer.Patches
                     {
                         const int iconRadius = 18;
                         const int iconThickness = 3;
-                        const int iconXFromLeft = 70; // right of backpack icon, left of text
+                        const int iconXFromLeft = 75; // right of backpack icon, left of text
 
                         int cx = invButton.bounds.Left + iconXFromLeft;
                         int cy = invButton.bounds.Center.Y;
@@ -859,9 +858,12 @@ namespace AndroidConsolizer.Patches
                             float ty = cy - letterSize.Y / 2 + iconYOffset;
 
                             // Faux-bold: draw at multiple 1px offsets for thicker appearance
-                            Utility.drawTextWithShadow(b, letter, Game1.smallFont, new Vector2(tx, ty), iconColor);
-                            Utility.drawTextWithShadow(b, letter, Game1.smallFont, new Vector2(tx + 1, ty), iconColor);
-                            Utility.drawTextWithShadow(b, letter, Game1.smallFont, new Vector2(tx, ty + 1), iconColor);
+                            // Use DrawString directly instead of Utility.drawTextWithShadow —
+                            // drawTextWithShadow ignores the alpha/color multiplication,
+                            // causing the letter to turn yellowish-orange instead of dimming on sell tab.
+                            b.DrawString(Game1.smallFont, letter, new Vector2(tx, ty), iconColor);
+                            b.DrawString(Game1.smallFont, letter, new Vector2(tx + 1, ty), iconColor);
+                            b.DrawString(Game1.smallFont, letter, new Vector2(tx, ty + 1), iconColor);
                         }
                     }
                 }

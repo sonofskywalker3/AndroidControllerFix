@@ -19,6 +19,9 @@ namespace AndroidConsolizer.Patches
     {
         private static IMonitor Monitor;
 
+        /// <summary>Raw right stick Y cached from GetState before suppression, for ShopMenuPatches navigation.</summary>
+        internal static float RawRightStickY;
+
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
         {
@@ -94,6 +97,22 @@ namespace AndroidConsolizer.Patches
                 // Only modify for player one
                 if (playerIndex != PlayerIndex.One)
                     return;
+
+                // Cache raw right stick Y before any suppression, so ShopMenuPatches can use it
+                RawRightStickY = __result.ThumbSticks.Right.Y;
+
+                // Zero out right thumbstick when ShopMenuPatches requests it (buy tab).
+                // This prevents vanilla from scrolling currentItemIndex via right stick;
+                // our own navigation code reads RawRightStickY directly.
+                if (ShopMenuPatches.SuppressRightStick && __result.ThumbSticks.Right != Vector2.Zero)
+                {
+                    __result = new GamePadState(
+                        new GamePadThumbSticks(__result.ThumbSticks.Left, Vector2.Zero),
+                        __result.Triggers,
+                        __result.Buttons,
+                        __result.DPad
+                    );
+                }
 
                 // A/B swap applies everywhere (main menu, game menus, gameplay)
                 bool swapAB = ShouldSwapAB();
