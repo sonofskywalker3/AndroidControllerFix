@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using HarmonyLib;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
@@ -472,9 +473,30 @@ namespace AndroidConsolizer.Patches
 
                 _savedSwatchBounds.Clear();
 
-                // Diagnostic: log original swatch bounds before relocation and reset tap counter
+                // Diagnostic: log game constants, picker fields, and original swatch bounds
                 _diagnosticTapCount = 0;
+                Monitor.Log($"[DIAG] Game1.pixelZoom={Game1.pixelZoom} Game1.tileSize={Game1.tileSize}", LogLevel.Alert);
+                Monitor.Log($"[DIAG] IClickableMenu.borderWidth={IClickableMenu.borderWidth} spaceToClearSideBorder={IClickableMenu.spaceToClearSideBorder} spaceToClearTopBorder={IClickableMenu.spaceToClearTopBorder}", LogLevel.Alert);
                 Monitor.Log($"[DIAG] Picker: pos=({gridX},{gridY}) size=({picker.width},{picker.height}) => stride=({strideX},{strideY})", LogLevel.Alert);
+
+                // Reflection dump of DiscreteColorPicker fields to find sizing constants
+                try
+                {
+                    var pickerType = picker.GetType();
+                    foreach (var field in pickerType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                    {
+                        if (field.FieldType.IsPrimitive || field.FieldType == typeof(string) || field.FieldType.IsEnum)
+                        {
+                            var val = field.GetValue(picker);
+                            Monitor.Log($"[DIAG] picker.{field.Name} ({field.FieldType.Name}) = {val}", LogLevel.Alert);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Monitor.Log($"[DIAG] Reflection failed: {ex.Message}", LogLevel.Alert);
+                }
+
                 for (int i = 0; i < swatches.Count; i++)
                 {
                     var s = swatches[i];
