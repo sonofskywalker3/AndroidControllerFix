@@ -719,22 +719,32 @@ namespace AndroidConsolizer.Patches
                 if (!ModEntry.Config?.EnableShopPurchaseFix ?? true)
                     return;
 
-                // Draw "Y" in a circle outline on the inventoryButton
+                // Draw controller button icon on the inventoryButton (tab-switch hint)
+                // Design values from preview_button_icon.html:
+                //   radius=18, thickness=3, yOffset=+3, xFromRight=40, font=bold
+                // TODO: Add X (Xbox) and Square (PlayStation) variants based on ControllerLayout
                 if (GamePad.GetState(PlayerIndex.One).IsConnected && InventoryButtonField != null)
                 {
                     var invButton = InventoryButtonField.GetValue(__instance) as ClickableComponent;
                     if (invButton != null && invButton.bounds.Width > 0)
                     {
-                        Vector2 ySize = Game1.smallFont.MeasureString("Y");
-                        int radius = (int)(Math.Max(ySize.X, ySize.Y) / 2) + 4;
+                        const int iconRadius = 18;
+                        const int iconThickness = 3;
+                        const int iconYOffset = 3;   // nudge letter down to look visually centered
+                        const int iconXFromRight = 40;
 
-                        int cx = invButton.bounds.Right - radius - 8;
+                        int cx = invButton.bounds.Right - iconXFromRight;
                         int cy = invButton.bounds.Center.Y;
 
-                        DrawCircleOutline(b, cx, cy, radius, Game1.textColor);
-                        Utility.drawTextWithShadow(b, "Y", Game1.smallFont,
-                            new Vector2(cx - ySize.X / 2, cy - ySize.Y / 2),
-                            Game1.textColor);
+                        DrawCircleOutline(b, cx, cy, iconRadius, Game1.textColor, iconThickness);
+
+                        // Faux-bold: draw text at multiple 1px offsets for thicker appearance
+                        Vector2 ySize = Game1.smallFont.MeasureString("Y");
+                        float tx = cx - ySize.X / 2;
+                        float ty = cy - ySize.Y / 2 + iconYOffset;
+                        Utility.drawTextWithShadow(b, "Y", Game1.smallFont, new Vector2(tx, ty), Game1.textColor);
+                        Utility.drawTextWithShadow(b, "Y", Game1.smallFont, new Vector2(tx + 1, ty), Game1.textColor);
+                        Utility.drawTextWithShadow(b, "Y", Game1.smallFont, new Vector2(tx, ty + 1), Game1.textColor);
                     }
                 }
 
