@@ -27,6 +27,13 @@ namespace AndroidConsolizer.Patches
         /// <summary>Flag to let a synthetic B press bypass our prefix.</summary>
         private static bool _bypassPrefix = false;
 
+        /// <summary>Whether the color picker is currently open and we're navigating swatches.</summary>
+        private static bool _colorPickerOpen = false;
+
+        /// <summary>Saved color toggle neighbors to restore when picker closes.</summary>
+        private static int _colorToggleSavedUp = -1;
+        private static int _colorToggleSavedDown = -1;
+
         /// <summary>Game tick when Close X was pressed. FixSnapNavigation checks this
         /// to auto-close a chest that reopened because A also fires "interact."</summary>
         private static int _closeXPressedTick = -100;
@@ -92,6 +99,7 @@ namespace AndroidConsolizer.Patches
                 }
 
                 _sideButtonObjects.Clear();
+                _colorPickerOpen = false;
                 bool verbose = ModEntry.Config.VerboseLogging;
 
                 // =====================================================
@@ -377,9 +385,9 @@ namespace AndroidConsolizer.Patches
         }
 
         /// <summary>Wire or unwire color picker swatches for snap navigation.
-        /// When opening: chain swatches left↔right, connect color toggle ↔ first swatch,
-        /// and add swatches to _sideButtonObjects for A-button handling.
-        /// When closing: remove swatches from _sideButtonObjects and restore color toggle wiring.</summary>
+        /// When opening: arrange swatches as 7x3 grid with proper neighbors,
+        /// block navigation to inventory/sidebar, add swatches to _sideButtonObjects.
+        /// When closing: remove swatches, restore color toggle wiring, snap back to toggle.</summary>
         private static void WireColorSwatches(ItemGrabMenu menu, bool opening)
         {
             bool verbose = ModEntry.Config.VerboseLogging;
@@ -404,27 +412,56 @@ namespace AndroidConsolizer.Patches
 
             if (opening)
             {
-                // Wire swatches into a horizontal chain
+                // Save color toggle's current neighbors before we modify them
+                if (_colorToggleButton != null)
+                {
+                    _colorToggleSavedUp = _colorToggleButton.upNeighborID;
+                    _colorToggleSavedDown = _colorToggleButton.downNeighborID;
+                }
+
+                // Arrange as 7 columns x 3 rows grid
+                // Swatches are sorted by X — first 7 are row 0, next 7 row 1, last 7 row 2
+                // But they're all at the same Y, so we just split the sorted list into rows of 7
+                int cols = 7;
+                int rows = swatches.Count / cols; // should be 3
+                if (rows < 1) rows = 1;
+
                 for (int i = 0; i < swatches.Count; i++)
                 {
+                    int row = i / cols;
+                    int col = i % cols;
                     var s = swatches[i];
-                    s.leftNeighborID = (i > 0) ? swatches[i - 1].myID : (_colorToggleButton?.myID ?? s.leftNeighborID);
-                    s.rightNeighborID = (i < swatches.Count - 1) ? swatches[i + 1].myID : s.rightNeighborID;
-                    // UP goes to color toggle, DOWN goes to color toggle (wrap around)
-                    s.upNeighborID = _colorToggleButton?.myID ?? s.upNeighborID;
-                    s.downNeighborID = _colorToggleButton?.myID ?? s.downNeighborID;
+
+                    // Left/right within row — edges do NOT wrap or escape
+                    s.leftNeighborID = (col > 0) ? swatches[i - 1].myID : -1;
+                    s.rightNeighborID = (col < cols - 1 && i + 1 < swatches.Count) ? swatches[i + 1].myID : -1;
+
+                    // Up/down between rows — edges do NOT wrap or escape
+                    s.upNeighborID = (row > 0) ? swatches[i - cols].myID : -1;
+                    s.downNeighborID = (row < rows - 1 && i + cols < swatches.Count) ? swatches[i + cols].myID : -1;
+
                     _sideButtonObjects.Add(s);
                 }
 
-                // Color toggle DOWN → first swatch
+                // Make color toggle NOT navigable while picker is open
+                // (no swatch points to it, and we'll block navigation away from the grid)
                 if (_colorToggleButton != null)
                 {
-                    _colorToggleButton.upNeighborID = swatches[0].myID;
-                    _colorToggleButton.downNeighborID = swatches[0].myID;
+                    _colorToggleButton.upNeighborID = -1;
+                    _colorToggleButton.downNeighborID = -1;
                 }
 
+                _colorPickerOpen = true;
+
                 if (verbose)
-                    Monitor.Log($"[ChestNav] Wired {swatches.Count} swatches: first={swatches[0].myID} last={swatches[swatches.Count - 1].myID}", LogLevel.Debug);
+                {
+                    Monitor.Log($"[ChestNav] Wired {swatches.Count} swatches as {cols}x{rows} grid", LogLevel.Debug);
+                    for (int i = 0; i < swatches.Count; i++)
+                    {
+                        var s = swatches[i];
+                        Monitor.Log($"[ChestNav]   swatch[{i}] ID={s.myID} L={s.leftNeighborID} R={s.rightNeighborID} U={s.upNeighborID} D={s.downNeighborID}", LogLevel.Debug);
+                    }
+                }
             }
             else
             {
@@ -432,17 +469,14 @@ namespace AndroidConsolizer.Patches
                 foreach (var s in swatches)
                     _sideButtonObjects.Remove(s);
 
-                // Restore color toggle's normal vertical neighbors
+                // Restore color toggle's saved neighbors
                 if (_colorToggleButton != null)
                 {
-                    // Restore to the values from FixSnapNavigation
-                    var fillStacks = menu.fillStacksButton;
-                    var sortInv = menu.inventory != null
-                        ? AccessTools.Field(typeof(InventoryMenu), "organizeButton")?.GetValue(menu.inventory) as ClickableComponent
-                        : null;
-                    _colorToggleButton.upNeighborID = fillStacks?.myID ?? _colorToggleButton.upNeighborID;
-                    _colorToggleButton.downNeighborID = sortInv?.myID ?? _colorToggleButton.downNeighborID;
+                    _colorToggleButton.upNeighborID = _colorToggleSavedUp;
+                    _colorToggleButton.downNeighborID = _colorToggleSavedDown;
                 }
+
+                _colorPickerOpen = false;
 
                 if (verbose)
                     Monitor.Log("[ChestNav] Unwired color swatches, restored toggle neighbors", LogLevel.Debug);
@@ -471,7 +505,98 @@ namespace AndroidConsolizer.Patches
 
                 // Log all button presses in chest menu for debugging
                 if (ModEntry.Config.VerboseLogging)
-                    Monitor.Log($"ItemGrabMenu button: {b} (remapped={remapped})", LogLevel.Debug);
+                    Monitor.Log($"ItemGrabMenu button: {b} (remapped={remapped}), pickerOpen={_colorPickerOpen}", LogLevel.Debug);
+
+                // =====================================================
+                // Color picker open: intercept ALL navigation + B
+                // =====================================================
+                if (_colorPickerOpen && ModEntry.Config.EnableChestNavFix)
+                {
+                    // B closes the picker (intercept BEFORE original method which would close the chest)
+                    if (remapped == Buttons.B)
+                    {
+                        if (ModEntry.Config.VerboseLogging)
+                            Monitor.Log("[ChestNav] B while picker open — closing picker", LogLevel.Debug);
+
+                        __instance.chestColorPicker.visible = false;
+                        Game1.playSound("drumkit6");
+                        WireColorSwatches(__instance, false);
+
+                        // Snap cursor back to color toggle button
+                        if (_colorToggleButton != null)
+                        {
+                            __instance.currentlySnappedComponent = _colorToggleButton;
+                            __instance.snapCursorToCurrentSnappedComponent();
+                        }
+                        return false;
+                    }
+
+                    // A on a swatch selects that color
+                    if (remapped == Buttons.A)
+                    {
+                        var snapped = __instance.currentlySnappedComponent;
+                        if (snapped != null && snapped.myID >= 4343 && snapped.myID <= 4363)
+                        {
+                            int cx = snapped.bounds.Center.X;
+                            int cy = snapped.bounds.Center.Y;
+                            if (ModEntry.Config.VerboseLogging)
+                                Monitor.Log($"[ChestNav] A on color swatch {snapped.myID} — click at ({cx},{cy})", LogLevel.Debug);
+                            __instance.receiveLeftClick(cx, cy);
+                        }
+                        return false;
+                    }
+
+                    // D-pad navigation: only allow movement within the swatch grid
+                    // Block ALL navigation buttons — the original method would let the
+                    // cursor wander into inventory slots that overlap the picker area.
+                    // Instead, we handle neighbor resolution ourselves.
+                    if (remapped == Buttons.DPadUp || remapped == Buttons.DPadDown ||
+                        remapped == Buttons.DPadLeft || remapped == Buttons.DPadRight ||
+                        remapped == Buttons.LeftThumbstickUp || remapped == Buttons.LeftThumbstickDown ||
+                        remapped == Buttons.LeftThumbstickLeft || remapped == Buttons.LeftThumbstickRight)
+                    {
+                        var snapped = __instance.currentlySnappedComponent;
+                        if (snapped == null)
+                            return false;
+
+                        int targetId = -1;
+                        if (remapped == Buttons.DPadUp || remapped == Buttons.LeftThumbstickUp)
+                            targetId = snapped.upNeighborID;
+                        else if (remapped == Buttons.DPadDown || remapped == Buttons.LeftThumbstickDown)
+                            targetId = snapped.downNeighborID;
+                        else if (remapped == Buttons.DPadLeft || remapped == Buttons.LeftThumbstickLeft)
+                            targetId = snapped.leftNeighborID;
+                        else if (remapped == Buttons.DPadRight || remapped == Buttons.LeftThumbstickRight)
+                            targetId = snapped.rightNeighborID;
+
+                        // Only navigate if the target is a valid swatch (stay within grid)
+                        if (targetId >= 4343 && targetId <= 4363)
+                        {
+                            var target = FindSwatchById(__instance, targetId);
+                            if (target != null)
+                            {
+                                __instance.currentlySnappedComponent = target;
+                                __instance.snapCursorToCurrentSnappedComponent();
+                                if (ModEntry.Config.VerboseLogging)
+                                    Monitor.Log($"[ChestNav] Picker nav: {snapped.myID} → {targetId}", LogLevel.Debug);
+                            }
+                        }
+                        return false;
+                    }
+
+                    // Block all other buttons while picker is open (X, Y, etc.)
+                    // Only let Start and shoulder buttons through for menu-level actions
+                    if (remapped != Buttons.Start && remapped != Buttons.LeftShoulder &&
+                        remapped != Buttons.RightShoulder && remapped != Buttons.LeftTrigger &&
+                        remapped != Buttons.RightTrigger)
+                    {
+                        return false;
+                    }
+                }
+
+                // =====================================================
+                // Normal chest navigation (picker closed)
+                // =====================================================
 
                 // A button on side buttons — simulate click at button position.
                 // On Android, A fires receiveLeftClick at the mouse position which doesn't
@@ -513,28 +638,19 @@ namespace AndroidConsolizer.Patches
                             // Wire or unwire swatch navigation
                             WireColorSwatches(__instance, opening);
 
-                            // Snap to first swatch when opening, back to toggle when closing
+                            // Snap to first swatch when opening
                             if (opening)
                             {
                                 var firstSwatch = FindSwatchById(__instance, 4343);
                                 if (firstSwatch != null)
-                                    __instance.setCurrentlySnappedComponentTo(firstSwatch.myID);
+                                {
+                                    __instance.currentlySnappedComponent = firstSwatch;
+                                    __instance.snapCursorToCurrentSnappedComponent();
+                                    if (ModEntry.Config.VerboseLogging)
+                                        Monitor.Log($"[ChestNav] Snapped to first swatch {firstSwatch.myID} at ({firstSwatch.bounds.Center.X},{firstSwatch.bounds.Center.Y})", LogLevel.Debug);
+                                }
                             }
 
-                            return false;
-                        }
-
-                        // --- Color swatch: A selects the color ---
-                        // Swatches are IDs 4343-4363, added to _sideButtonObjects
-                        // when the picker opens. receiveLeftClick at swatch center
-                        // to select that color.
-                        if (snapped.myID >= 4343 && snapped.myID <= 4363)
-                        {
-                            int cx2 = snapped.bounds.Center.X;
-                            int cy2 = snapped.bounds.Center.Y;
-                            if (ModEntry.Config.VerboseLogging)
-                                Monitor.Log($"[ChestNav] A on color swatch {snapped.myID} — click at ({cx2},{cy2})", LogLevel.Debug);
-                            __instance.receiveLeftClick(cx2, cy2);
                             return false;
                         }
 
