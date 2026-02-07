@@ -18,6 +18,15 @@ namespace AndroidConsolizer.Patches
         /// Stored by reference because some buttons share duplicate myID values.</summary>
         private static HashSet<ClickableComponent> _sideButtonObjects = new HashSet<ClickableComponent>();
 
+        /// <summary>Reference to Close X button, handled specially (simulate B to close).</summary>
+        private static ClickableComponent _closeXButton = null;
+
+        /// <summary>Reference to color toggle button, handled specially (direct toggle).</summary>
+        private static ClickableComponent _colorToggleButton = null;
+
+        /// <summary>Flag to let a synthetic B press bypass our prefix.</summary>
+        private static bool _bypassPrefix = false;
+
         // Unique IDs assigned to buttons with duplicate or sentinel myIDs
         private const int ID_SORT_CHEST = 54106;    // was 106
         private const int ID_SORT_INV = 54206;       // was 106
@@ -222,6 +231,10 @@ namespace AndroidConsolizer.Patches
                     _sideButtonObjects.Add(closeX);
                 }
 
+                // Store references for special A-button handling
+                _closeXButton = closeX;
+                _colorToggleButton = colorToggle;
+
                 // =====================================================
                 // Step 4: Wire grid rightmost → sidebar (RIGHT)
                 // Do NOT touch -7777 sentinel values on up/down.
@@ -345,6 +358,13 @@ namespace AndroidConsolizer.Patches
                 if (__instance.shippingBin)
                     return true;
 
+                // Allow synthetic B presses to pass through to the original method
+                if (_bypassPrefix)
+                {
+                    _bypassPrefix = false;
+                    return true;
+                }
+
                 // Remap button based on configured button style
                 Buttons remapped = ButtonRemapper.Remap(b);
 
@@ -360,29 +380,50 @@ namespace AndroidConsolizer.Patches
                     var snapped = __instance.currentlySnappedComponent;
                     if (snapped != null && _sideButtonObjects.Contains(snapped))
                     {
+                        // --- Close X: simulate B press instead of receiveLeftClick ---
+                        // receiveLeftClick at the X button closes the menu, but A also
+                        // fires as "interact" in the overworld, immediately reopening
+                        // the chest. Sending B through the original handler closes the
+                        // menu via the normal path, and B doesn't trigger interact.
+                        if (snapped == _closeXButton)
+                        {
+                            if (ModEntry.Config.VerboseLogging)
+                                Monitor.Log("[ChestNav] A on Close X — simulating B press to close", LogLevel.Debug);
+                            _bypassPrefix = true;
+                            __instance.receiveGamePadButton(Buttons.B);
+                            return false;
+                        }
+
+                        // --- Color Toggle: direct toggle instead of receiveLeftClick ---
+                        // receiveLeftClick sets chestColorPicker.visible=True internally
+                        // but doesn't produce visual button feedback or actually render
+                        // the picker on Android. Use the game's actual toggle path.
+                        if (snapped == _colorToggleButton && __instance.chestColorPicker != null)
+                        {
+                            if (ModEntry.Config.VerboseLogging)
+                            {
+                                bool visBefore = __instance.chestColorPicker.visible;
+                                Monitor.Log($"[ChestNav] A on Color Toggle — direct toggle, picker visible={visBefore}", LogLevel.Debug);
+                            }
+
+                            // Toggle the picker visibility (same as the game does)
+                            __instance.chestColorPicker.visible = !__instance.chestColorPicker.visible;
+                            Game1.playSound("drumkit6");
+
+                            if (ModEntry.Config.VerboseLogging)
+                            {
+                                bool visAfter = __instance.chestColorPicker.visible;
+                                Monitor.Log($"[ChestNav] Color picker now visible={visAfter}, type={__instance.chestColorPicker.GetType().Name}, bounds=({__instance.chestColorPicker.xPositionOnScreen},{__instance.chestColorPicker.yPositionOnScreen},{__instance.chestColorPicker.width},{__instance.chestColorPicker.height})", LogLevel.Debug);
+                            }
+                            return false;
+                        }
+
+                        // --- All other side buttons: receiveLeftClick at button center ---
                         int cx = snapped.bounds.Center.X;
                         int cy = snapped.bounds.Center.Y;
                         if (ModEntry.Config.VerboseLogging)
                             Monitor.Log($"[ChestNav] A on side button {snapped.myID} — click at ({cx},{cy})", LogLevel.Debug);
-
-                        // Diagnostic for color toggle (TODO #13b)
-                        bool isColorToggle = (snapped == __instance.colorPickerToggleButton);
-                        if (isColorToggle && ModEntry.Config.VerboseLogging)
-                        {
-                            var picker = __instance.chestColorPicker;
-                            bool pickerVisibleBefore = picker?.visible ?? false;
-                            bool containsPoint = __instance.colorPickerToggleButton?.containsPoint(cx, cy) ?? false;
-                            Monitor.Log($"[ChestNav] COLOR TOGGLE DIAG: containsPoint({cx},{cy})={containsPoint}, picker={picker?.GetType().Name ?? "null"}, visibleBefore={pickerVisibleBefore}", LogLevel.Debug);
-                        }
-
                         __instance.receiveLeftClick(cx, cy);
-
-                        if (isColorToggle && ModEntry.Config.VerboseLogging)
-                        {
-                            bool pickerVisibleAfter = __instance.chestColorPicker?.visible ?? false;
-                            Monitor.Log($"[ChestNav] COLOR TOGGLE DIAG: visibleAfter={pickerVisibleAfter}", LogLevel.Debug);
-                        }
-
                         return false;
                     }
                 }
