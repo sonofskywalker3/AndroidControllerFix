@@ -641,6 +641,11 @@ namespace AndroidConsolizer.Patches
                         Game1.playSound("drumkit6");
                         WireColorSwatches(__instance, false);
 
+                        // Suppress B at GetState level until released — prevents
+                        // other code paths from also seeing B and closing the chest
+                        GameplayButtonPatches.SuppressBUntilRelease = true;
+                        GameplayButtonPatches.InvalidateCache();
+
                         // Snap cursor back to color toggle button
                         if (_colorToggleButton != null)
                         {

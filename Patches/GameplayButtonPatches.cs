@@ -27,6 +27,19 @@ namespace AndroidConsolizer.Patches
         private static float _cachedRawRightStickY;
         private static int _cachedTick = -1;
 
+        /// <summary>Suppress logical A in GetState output until the physical button is released.
+        /// Set by ItemGrabMenuPatches when A on Close X closes a chest.</summary>
+        internal static bool SuppressAUntilRelease;
+
+        /// <summary>Suppress logical B in GetState output until the physical button is released.
+        /// Set by ItemGrabMenuPatches when B closes the color picker.</summary>
+        internal static bool SuppressBUntilRelease;
+
+        /// <summary>Invalidate the cached GetState so the next call recomputes.
+        /// Must be called after setting Suppress*UntilRelease flags mid-tick,
+        /// since the cache may already have the unsuppressed state.</summary>
+        internal static void InvalidateCache() { _cachedTick = -1; }
+
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
         {
@@ -90,6 +103,55 @@ namespace AndroidConsolizer.Patches
             return isXboxLayout != isXboxStyle;
         }
 
+        /// <summary>Apply suppress-until-release logic to the final gamepad state.
+        /// For each active suppression flag: if the button is still pressed, zeros it out
+        /// in the returned state; if released, clears the flag. This runs on the post-swap
+        /// state so it suppresses the LOGICAL button the game sees.</summary>
+        private static GamePadState ApplyButtonSuppression(GamePadState state)
+        {
+            bool suppressA = false, suppressB = false;
+
+            if (SuppressAUntilRelease)
+            {
+                if (state.Buttons.A == ButtonState.Pressed)
+                    suppressA = true;
+                else
+                    SuppressAUntilRelease = false;
+            }
+
+            if (SuppressBUntilRelease)
+            {
+                if (state.Buttons.B == ButtonState.Pressed)
+                    suppressB = true;
+                else
+                    SuppressBUntilRelease = false;
+            }
+
+            if (!suppressA && !suppressB)
+                return state;
+
+            var newButtons = new GamePadButtons(
+                ((state.Buttons.A == ButtonState.Pressed && !suppressA) ? Buttons.A : 0) |
+                ((state.Buttons.B == ButtonState.Pressed && !suppressB) ? Buttons.B : 0) |
+                ((state.Buttons.X == ButtonState.Pressed) ? Buttons.X : 0) |
+                ((state.Buttons.Y == ButtonState.Pressed) ? Buttons.Y : 0) |
+                ((state.Buttons.Start == ButtonState.Pressed) ? Buttons.Start : 0) |
+                ((state.Buttons.Back == ButtonState.Pressed) ? Buttons.Back : 0) |
+                ((state.Buttons.LeftStick == ButtonState.Pressed) ? Buttons.LeftStick : 0) |
+                ((state.Buttons.RightStick == ButtonState.Pressed) ? Buttons.RightStick : 0) |
+                ((state.Buttons.LeftShoulder == ButtonState.Pressed) ? Buttons.LeftShoulder : 0) |
+                ((state.Buttons.RightShoulder == ButtonState.Pressed) ? Buttons.RightShoulder : 0) |
+                ((state.Buttons.BigButton == ButtonState.Pressed) ? Buttons.BigButton : 0)
+            );
+
+            return new GamePadState(
+                state.ThumbSticks,
+                state.Triggers,
+                newButtons,
+                state.DPad
+            );
+        }
+
         /// <summary>
         /// Postfix for GamePad.GetState - modifies the returned state to swap buttons as needed.
         /// A/B swap applies EVERYWHERE (main menu, game menus, gameplay).
@@ -141,6 +203,7 @@ namespace AndroidConsolizer.Patches
                 // Nothing to do if no swapping needed
                 if (!swapXY && !swapAB)
                 {
+                    __result = ApplyButtonSuppression(__result);
                     _cachedState = __result;
                     _cachedRawRightStickY = RawRightStickY;
                     _cachedTick = currentTick;
@@ -162,6 +225,7 @@ namespace AndroidConsolizer.Patches
                 // Only reconstruct if something actually changed
                 if (finalA == originalA && finalB == originalB && finalX == originalX && finalY == originalY)
                 {
+                    __result = ApplyButtonSuppression(__result);
                     _cachedState = __result;
                     _cachedRawRightStickY = RawRightStickY;
                     _cachedTick = currentTick;
@@ -190,6 +254,7 @@ namespace AndroidConsolizer.Patches
                     __result.DPad
                 );
 
+                __result = ApplyButtonSuppression(__result);
                 _cachedState = __result;
                 _cachedRawRightStickY = RawRightStickY;
                 _cachedTick = currentTick;
