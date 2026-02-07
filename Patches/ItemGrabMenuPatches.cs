@@ -435,15 +435,17 @@ namespace AndroidConsolizer.Patches
                 int rows = swatches.Count / cols; // should be 3
                 if (rows < 1) rows = 1;
 
-                // Use the first swatch's bounds as the anchor for the grid layout.
-                // Original data has all 21 swatches in a flat row at stride = width (no gap).
-                // We use the same stride to match the visual render exactly.
-                int gridX = swatches[0].bounds.X;        // leftmost X
-                int gridY = swatches[0].bounds.Y;        // baseline Y
-                int swatchW = swatches[0].bounds.Width;   // swatch width (80)
-                int swatchH = swatches[0].bounds.Height;  // swatch height (72)
-                int strideX = swatchW;                    // horizontal spacing = width (no gap)
-                int strideY = swatchH;                    // vertical spacing = height (no gap)
+                // Derive the visual grid layout from the picker's own dimensions.
+                // The DiscreteColorPicker renders a 7x3 grid within its width/height,
+                // but the component bounds are wrong (flat row at Y:106). Read the
+                // picker's actual size to get the exact visual stride.
+                var picker = menu.chestColorPicker;
+                int gridX = picker.xPositionOnScreen;
+                int gridY = picker.yPositionOnScreen;
+                int strideX = picker.width / cols;
+                int strideY = picker.height / rows;
+                int swatchW = strideX;  // bounds width = stride (fill the cell)
+                int swatchH = strideY;  // bounds height = stride
 
                 _savedSwatchBounds.Clear();
 
