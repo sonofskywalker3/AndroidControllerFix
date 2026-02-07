@@ -27,8 +27,15 @@ namespace AndroidConsolizer.Patches
         /// <summary>Flag to let a synthetic B press bypass our prefix.</summary>
         private static bool _bypassPrefix = false;
 
-        /// <summary>Whether the color picker is currently open and we're navigating swatches.</summary>
+        /// <summary>Whether the color picker is currently open and we're navigating swatches.
+        /// When true, left thumbstick is suppressed at the GamePad.GetState level (to prevent
+        /// the game's separate nav code from also moving the cursor), and our prefix handles
+        /// all navigation manually.</summary>
         private static bool _colorPickerOpen = false;
+
+        /// <summary>Returns true when left thumbstick should be zeroed in GamePad.GetState.
+        /// Called from GameplayButtonPatches.GetState_Postfix.</summary>
+        internal static bool ShouldSuppressLeftStick() => _colorPickerOpen;
 
         /// <summary>Saved color toggle neighbors to restore when picker closes.</summary>
         private static int _colorToggleSavedUp = -1;
@@ -547,22 +554,41 @@ namespace AndroidConsolizer.Patches
                         return false;
                     }
 
-                    // D-pad/thumbstick navigation: block ItemGrabMenu.receiveGamePadButton
-                    // but do NOT manually navigate. The game has a SEPARATE nav code path
-                    // (outside receiveGamePadButton) that processes thumbstick input using
-                    // the neighbor IDs we wired on the swatches. If we also navigate here,
-                    // the cursor moves TWICE per input (v2.9.14 bug). Returning false blocks
-                    // ItemGrabMenu-specific processing while letting the game's own nav work.
-                    // Swatch edges are wired to -1 so the game's nav stays within the grid.
+                    // D-pad/thumbstick navigation: handle manually within the swatch grid.
+                    // Left thumbstick is suppressed at the GamePad.GetState level (via
+                    // ShouldSuppressLeftStick) so the game's separate nav code can't move
+                    // the cursor. We handle all movement here. D-pad events still arrive
+                    // via receiveGamePadButton even with thumbstick suppressed.
                     if (remapped == Buttons.DPadUp || remapped == Buttons.DPadDown ||
                         remapped == Buttons.DPadLeft || remapped == Buttons.DPadRight ||
                         remapped == Buttons.LeftThumbstickUp || remapped == Buttons.LeftThumbstickDown ||
                         remapped == Buttons.LeftThumbstickLeft || remapped == Buttons.LeftThumbstickRight)
                     {
-                        if (ModEntry.Config.VerboseLogging)
+                        var snapped = __instance.currentlySnappedComponent;
+                        if (snapped == null)
+                            return false;
+
+                        int targetId = -1;
+                        if (remapped == Buttons.DPadUp || remapped == Buttons.LeftThumbstickUp)
+                            targetId = snapped.upNeighborID;
+                        else if (remapped == Buttons.DPadDown || remapped == Buttons.LeftThumbstickDown)
+                            targetId = snapped.downNeighborID;
+                        else if (remapped == Buttons.DPadLeft || remapped == Buttons.LeftThumbstickLeft)
+                            targetId = snapped.leftNeighborID;
+                        else if (remapped == Buttons.DPadRight || remapped == Buttons.LeftThumbstickRight)
+                            targetId = snapped.rightNeighborID;
+
+                        // Only navigate if the target is a valid swatch (stay within grid)
+                        if (targetId >= 4343 && targetId <= 4363)
                         {
-                            var snapped = __instance.currentlySnappedComponent;
-                            Monitor.Log($"[ChestNav] Picker nav blocked for game handling: snapped={snapped?.myID ?? -1}", LogLevel.Debug);
+                            var target = FindSwatchById(__instance, targetId);
+                            if (target != null)
+                            {
+                                __instance.currentlySnappedComponent = target;
+                                __instance.snapCursorToCurrentSnappedComponent();
+                                if (ModEntry.Config.VerboseLogging)
+                                    Monitor.Log($"[ChestNav] Picker nav: {snapped.myID} → {targetId}", LogLevel.Debug);
+                            }
                         }
                         return false;
                     }

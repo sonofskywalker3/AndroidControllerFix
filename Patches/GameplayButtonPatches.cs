@@ -130,6 +130,21 @@ namespace AndroidConsolizer.Patches
                     );
                 }
 
+                // Zero out left thumbstick when color picker is open in chest menu.
+                // The game has a separate nav code path that reads thumbstick directly
+                // (outside receiveGamePadButton) to move snap navigation. Our prefix
+                // handles swatch navigation manually, so we must suppress the game's
+                // own thumbstick nav to prevent double-movement or escape from the grid.
+                if (ItemGrabMenuPatches.ShouldSuppressLeftStick() && __result.ThumbSticks.Left != Vector2.Zero)
+                {
+                    __result = new GamePadState(
+                        new GamePadThumbSticks(Vector2.Zero, __result.ThumbSticks.Right),
+                        __result.Triggers,
+                        __result.Buttons,
+                        __result.DPad
+                    );
+                }
+
                 // A/B swap applies everywhere (main menu, game menus, gameplay)
                 bool swapAB = ShouldSwapAB();
 
