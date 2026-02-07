@@ -21,6 +21,10 @@ namespace AndroidConsolizer.Patches
         private static FieldInfo HoveredItemField;
         private static FieldInfo QuantityToBuyField;
         private static FieldInfo InventoryButtonField;
+        private static FieldInfo CurrentItemIndexField;
+
+        // Saved state for blocking vanilla right stick scroll
+        private static int _savedCurrentItemIndex;
 
         // Y button sell-one hold tracking
         private static bool _yHeldOnSellTab;
@@ -58,6 +62,7 @@ namespace AndroidConsolizer.Patches
             HoveredItemField = AccessTools.Field(typeof(ShopMenu), "hoveredItem");
             QuantityToBuyField = AccessTools.Field(typeof(ShopMenu), "quantityToBuy");
             InventoryButtonField = AccessTools.Field(typeof(ShopMenu), "inventoryButton");
+            CurrentItemIndexField = AccessTools.Field(typeof(ShopMenu), "currentItemIndex");
 
             try
             {
@@ -70,9 +75,11 @@ namespace AndroidConsolizer.Patches
                     prefix: new HarmonyMethod(typeof(ShopMenuPatches), nameof(ReceiveGamePadButton_Prefix))
                 );
 
-                // Patch update to handle held button for bulk purchasing
+                // Patch update — prefix saves currentItemIndex (to undo vanilla right stick scroll),
+                // postfix handles hold-to-repeat and right stick navigation
                 harmony.Patch(
                     original: AccessTools.Method(typeof(ShopMenu), nameof(ShopMenu.update)),
+                    prefix: new HarmonyMethod(typeof(ShopMenuPatches), nameof(Update_Prefix)),
                     postfix: new HarmonyMethod(typeof(ShopMenuPatches), nameof(Update_Postfix))
                 );
 
@@ -610,6 +617,14 @@ namespace AndroidConsolizer.Patches
         }
 
         /// <summary>Postfix for update to handle held A button for continuous purchasing.</summary>
+        /// <summary>Prefix for update — saves currentItemIndex before vanilla can scroll it via right stick.</summary>
+        private static void Update_Prefix(ShopMenu __instance)
+        {
+            if (CurrentItemIndexField != null)
+                _savedCurrentItemIndex = (int)CurrentItemIndexField.GetValue(__instance);
+        }
+
+        /// <summary>Postfix for update — hold-to-repeat, right stick navigation, quantity reset.</summary>
         private static void Update_Postfix(ShopMenu __instance, GameTime time)
         {
             // Get gamepad state once for all hold-to-repeat checks
@@ -694,14 +709,19 @@ namespace AndroidConsolizer.Patches
                 }
             }
 
-            // Right stick navigation — jump 5 items at a time on buy tab
-            // Simulates DPad presses since setCurrentlySnappedComponentTo doesn't work
-            // on Android's ShopMenu (snap methods are broken on Android).
+            // Right stick navigation — jump 5 items at a time on buy tab.
+            // Vanilla right stick scrolls the view (currentItemIndex) without moving selection.
+            // We undo vanilla's scroll (restore saved currentItemIndex) and instead simulate
+            // DPad presses which move both selection AND view together.
             if (onBuyTab)
             {
                 float rsY = gpState.ThumbSticks.Right.Y;
                 bool stickDown = rsY < -RStickThreshold;
                 bool stickUp = rsY > RStickThreshold;
+
+                // Undo vanilla's right stick scroll whenever stick is active
+                if ((stickDown || stickUp) && CurrentItemIndexField != null)
+                    CurrentItemIndexField.SetValue(__instance, _savedCurrentItemIndex);
 
                 if (stickDown || stickUp)
                 {
@@ -794,9 +814,9 @@ namespace AndroidConsolizer.Patches
                     return;
 
                 // Draw controller button icon on the inventoryButton (tab-switch hint)
-                // Design values from preview_button_icon.html:
-                //   radius=18, thickness=3, yOffset=+5, xOffset=+2, xFromRight=40, font=bold
-                // Switch=Y, Xbox=X, PlayStation=Square (filled)
+                // Positioned on the left side (between backpack icon and "Inventory" text)
+                // to avoid overlapping vanilla's "Owned: X" display on the right side.
+                // Dimmed when on sell tab to match the grayed-out button appearance.
                 if (GamePad.GetState(PlayerIndex.One).IsConnected && InventoryButtonField != null)
                 {
                     var invButton = InventoryButtonField.GetValue(__instance) as ClickableComponent;
@@ -804,44 +824,44 @@ namespace AndroidConsolizer.Patches
                     {
                         const int iconRadius = 18;
                         const int iconThickness = 3;
-                        const int iconXFromRight = 40;
+                        const int iconXFromLeft = 70; // right of backpack icon, left of text
 
-                        int cx = invButton.bounds.Right - iconXFromRight;
+                        int cx = invButton.bounds.Left + iconXFromLeft;
                         int cy = invButton.bounds.Center.Y;
 
-                        DrawCircleOutline(b, cx, cy, iconRadius, Game1.textColor, iconThickness);
+                        // Dim icon when on sell tab (button is grayed out)
+                        bool onSellTab = InvVisibleField != null && (bool)InvVisibleField.GetValue(__instance);
+                        Color iconColor = onSellTab ? Game1.textColor * 0.4f : Game1.textColor;
+
+                        DrawCircleOutline(b, cx, cy, iconRadius, iconColor, iconThickness);
 
                         var layout = ModEntry.Config?.ControllerLayout ?? ControllerLayout.Switch;
                         if (layout == ControllerLayout.PlayStation)
                         {
                             // Outlined square centered in the circle, thickness matches circle
-                            int sqSize = iconRadius; // half the diameter looks proportional
-                            int sqX = cx - sqSize / 2 + 2; // +1 right from previous +1
-                            int sqY = cy - sqSize / 2 + 2; // +1 down from previous +1
-                            // Top edge
-                            b.Draw(Game1.staminaRect, new Rectangle(sqX, sqY, sqSize, iconThickness), Game1.textColor);
-                            // Bottom edge
-                            b.Draw(Game1.staminaRect, new Rectangle(sqX, sqY + sqSize - iconThickness, sqSize, iconThickness), Game1.textColor);
-                            // Left edge
-                            b.Draw(Game1.staminaRect, new Rectangle(sqX, sqY, iconThickness, sqSize), Game1.textColor);
-                            // Right edge
-                            b.Draw(Game1.staminaRect, new Rectangle(sqX + sqSize - iconThickness, sqY, iconThickness, sqSize), Game1.textColor);
+                            int sqSize = iconRadius;
+                            int sqX = cx - sqSize / 2 + 2;
+                            int sqY = cy - sqSize / 2 + 2;
+                            b.Draw(Game1.staminaRect, new Rectangle(sqX, sqY, sqSize, iconThickness), iconColor);
+                            b.Draw(Game1.staminaRect, new Rectangle(sqX, sqY + sqSize - iconThickness, sqSize, iconThickness), iconColor);
+                            b.Draw(Game1.staminaRect, new Rectangle(sqX, sqY, iconThickness, sqSize), iconColor);
+                            b.Draw(Game1.staminaRect, new Rectangle(sqX + sqSize - iconThickness, sqY, iconThickness, sqSize), iconColor);
                         }
                         else
                         {
                             // Letter icon: Y for Switch, X for Xbox
                             string letter = layout == ControllerLayout.Xbox ? "X" : "Y";
-                            const int iconYOffset = 5;  // nudge down — game font has more ascender than descender
-                            const int iconXOffset = 3;  // nudge right — shadow shifts perceived center left
+                            const int iconYOffset = 5;
+                            const int iconXOffset = 3;
 
                             Vector2 letterSize = Game1.smallFont.MeasureString(letter);
                             float tx = cx - letterSize.X / 2 + iconXOffset;
                             float ty = cy - letterSize.Y / 2 + iconYOffset;
 
                             // Faux-bold: draw at multiple 1px offsets for thicker appearance
-                            Utility.drawTextWithShadow(b, letter, Game1.smallFont, new Vector2(tx, ty), Game1.textColor);
-                            Utility.drawTextWithShadow(b, letter, Game1.smallFont, new Vector2(tx + 1, ty), Game1.textColor);
-                            Utility.drawTextWithShadow(b, letter, Game1.smallFont, new Vector2(tx, ty + 1), Game1.textColor);
+                            Utility.drawTextWithShadow(b, letter, Game1.smallFont, new Vector2(tx, ty), iconColor);
+                            Utility.drawTextWithShadow(b, letter, Game1.smallFont, new Vector2(tx + 1, ty), iconColor);
+                            Utility.drawTextWithShadow(b, letter, Game1.smallFont, new Vector2(tx, ty + 1), iconColor);
                         }
                     }
                 }
