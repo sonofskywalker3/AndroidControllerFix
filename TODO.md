@@ -162,13 +162,10 @@ These need to be re-implemented **one at a time, one per 0.0.1 patch, each commi
 - **Fix approach:** Apply the same cursor/snap navigation patches used in inventory to the bundle donation menu. The 4-slot jump suggests the cursor is interpreting A-press coordinates incorrectly (same class of bug as the inventory A-button-as-click issue).
 - May need patches on `JunimoNoteMenu` (the bundle UI class).
 
-### 10. Trash Can / Sort Unreachable in Item Grab Menus
-- Can't navigate to trash or sort in chest/fishing contexts
-- **Symptom:** When in an `ItemGrabMenu` (chests, fishing treasure, caught-fish-with-full-inventory), cannot navigate the cursor to the trash can or sort button. Only inventory slots are reachable.
-- Confirmed on Logitech G Cloud.
-- This is separate from the inventory page trash can fix (#15 implemented) — that fix is on `InventoryPage`, not `ItemGrabMenu`.
-- **Root cause:** Same as #13 (Chest Color Selection) — `ItemGrabMenuPatches.cs` has no snap navigation modifications. The trash can and sort button exist as clickable components but their neighborIDs aren't chained to the inventory grid in the item grab context.
-- Fix should be bundled with #13 when modifying ItemGrabMenu snap navigation.
+### 10. Trash Can / Sort Unreachable in Item Grab Menus — FIXED in v2.9.8
+- **Fixed:** Sidebar buttons (Sort Chest, Fill Stacks, Color Toggle, Sort Inventory, Trash, Close X) are now reachable via snap navigation.
+- Close X required special handling — A simulates B press + tick-based reopen suppression (v2.9.13).
+- See `CHESTNAV_SPEC.md` for the full navigation wiring spec.
 
 ### 11. Touch Interrupt Returns Held Item + Intentional Item Drop
 - Two related issues with held items
@@ -197,35 +194,54 @@ These need to be re-implemented **one at a time, one per 0.0.1 patch, each commi
   - Must subclass `OptionsSlider` with own value management since game's zoom handling may not be wired on Android
   - Note: GMCM's "Mod Options" button is partially cut off (1px visible) at bottom of Options page - scroll bounds don't account for injected elements. Our slider injection may need to fix scroll bounds too.
 
-### 13. Chest Color Selection
-- Far-right chest options (color, auto-sort) unreachable with D-pad/joystick
-- Confirmed on Odin Pro and Logitech G Cloud. Mod already works around sort (X) and add-to-stacks (Y), but color picker has NO workaround - completely inaccessible
-- G Cloud testing: Can't move cursor to any buttons, only inventory slots.
-- Root cause: ItemGrabMenuPatches.cs has ZERO snap navigation modifications. The buttons exist as clickable components but their neighborIDs aren't chained to the inventory grid
-- ShippingBinPatches already proves neighbor ID modification works (creates custom drop zone with snap chains)
-- Fix approach: Postfix patch on ItemGrabMenu that modifies rightNeighborID/leftNeighborID on relevant components after menu populates
-  - Step 1: Add logging to dump all `allClickableComponents` (myID, bounds, name) to identify button IDs
-  - Step 2: Chain rightNeighborID from rightmost inventory slot -> organize button -> color picker -> fill stacks
-  - Step 3: Chain leftNeighborID back from those buttons -> inventory
-- Precedent: ShippingBinPatches.cs already does this exact pattern
-- **Bundle with #10** — both require ItemGrabMenu snap navigation overhaul
+### 13. Chest Sidebar Navigation — MOSTLY FIXED in v2.9.8-v2.9.13
+- Sidebar buttons all navigable and functional: Sort Chest, Fill Stacks, Sort Inventory, Trash, Close X
+- Color toggle button opens/closes the DiscreteColorPicker via direct `.visible` toggle + "drumkit6" sound (v2.9.12)
+- `receiveLeftClick` does NOT work for the color toggle on Android — must toggle `.visible` directly
+- **REMAINING: Color picker swatch navigation (see #13b)**
 
-### 13b. Color Toggle A-Button Does Not Open Color Picker
-- **Status:** Navigation TO the color toggle button works (v2.9.7+). Pressing A does NOT open the color picker.
-- **What happens:** The A-button handler in `ReceiveGamePadButton_Prefix` correctly intercepts the press, identifies the snapped component as the color toggle (ID 27346), and calls `__instance.receiveLeftClick(1374, 337)` at the button's center coordinates. The click fires (confirmed in logs) but the DiscreteColorPicker does not open.
-- **Log evidence (v2.9.7):**
-  ```
-  [ChestNav] A on side button 27346 — click at (1374,337)
-  ```
-  This fired twice — no color picker either time.
-- **Button bounds:** X:1342 Y:305 Width:64 Height:64. Click coords (1374, 337) are the exact center.
-- **Possible root causes:**
-  1. `ItemGrabMenu.receiveLeftClick()` may not handle the color toggle button — the toggle might be handled in a different method (e.g., `receiveRightClick`, a specific gamepad handler, or a base class method)
-  2. The game might check a different field/flag (e.g., `chestColorPicker.visible`) that isn't toggled by `receiveLeftClick`
-  3. The color toggle might need its click routed through a different code path than `receiveLeftClick` on Android
-- **Investigation needed:** Decompile `ItemGrabMenu.receiveLeftClick()` to see if it checks `colorPickerToggleButton.containsPoint(x, y)`. If not, find where the toggle is handled. Also check if the original `receiveGamePadButton` had special color-toggle handling that we're blocking by returning false.
-- **Workaround:** None currently. Color picker is completely inaccessible via controller.
-- **File:** `Patches/ItemGrabMenuPatches.cs` — the A-button handler in `ReceiveGamePadButton_Prefix`
+### 13b. Color Picker Swatch Navigation — NEEDS IMPLEMENTATION
+- **Status:** The color toggle button WORKS (opens/closes the picker). But once the picker is open, there is no proper controller navigation of the color swatches. This is the last remaining piece of the chest navigation overhaul.
+- **Current broken behavior (v2.9.13):**
+  - `setCurrentlySnappedComponentTo()` does NOT move the cursor to the first swatch
+  - Pressing LEFT from the picker goes back to inventory slots
+  - Pressing RIGHT snaps to the first swatch then continues off-screen
+  - v2.9.13 wired swatches as a single row of 21 — but they're actually a **7-column x 3-row grid**
+  - Inventory slot navigation is NOT blocked while the picker is open, so the cursor wanders through inventory slots that overlap with the picker area
+- **What needs to happen:**
+  1. **Block inventory slot navigation** while the color picker is open — the cursor must stay within the swatch grid
+  2. **Snap cursor to swatch 1** when the picker first opens
+  3. **Wire swatches as a 7x3 grid** with correct left/right/up/down neighbors
+  4. **B button closes the picker** — not pressing the color toggle button again
+  5. **Color toggle button should NOT be navigable** while the picker is open
+  6. **A button on a swatch** should select that color (call `receiveLeftClick` at swatch center)
+- **Swatch details from v2.9.6 diagnostic dump:**
+  - 21 DiscreteColorPicker components, IDs 4343-4363
+  - All in `allClickableComponents` (even when picker is invisible)
+  - All at Y:106, each 80x72, spanning X:48 to X:1728
+  - DiscreteColorPicker bounds: (28, 86, 1214, 282)
+  - Grid is 7 columns x 3 rows (confirmed by user)
+  - Swatches are sorted by X position in allClickableComponents
+- **Implementation approach:**
+  - When color toggle is pressed and picker OPENS:
+    - Collect swatches from `allClickableComponents` (IDs 4343-4363), sort by X
+    - Arrange into 7x3 grid (first 7 = row 0, next 7 = row 1, last 7 = row 2)
+    - Wire left↔right within each row, up↔down between rows
+    - First swatch of row 0: leftNeighborID = last swatch of row 0 (or -1)
+    - Last swatch of row: rightNeighborID = first swatch of row (or -1)
+    - Row 0 UP = -1 (no escape up), Row 2 DOWN = -1 (no escape down)
+    - Add all swatches to `_sideButtonObjects`
+    - Snap cursor to first swatch
+    - Block navigation to inventory/sidebar while picker is open (must intercept D-pad/stick in prefix and only allow movement within swatch grid)
+  - When B is pressed while picker is open:
+    - Close the picker (`chestColorPicker.visible = false`)
+    - Remove swatches from `_sideButtonObjects`
+    - Restore color toggle neighbors
+    - Snap cursor back to color toggle button
+  - The B handler must be in `ReceiveGamePadButton_Prefix` — intercept B when picker is open BEFORE the original method (which would close the entire chest menu)
+- **Key pitfall from v2.9.13:** `setCurrentlySnappedComponentTo(id)` did NOT move the cursor. May need to use `snapToDefaultClickableComponent()` after setting `currentlySnappedComponent` directly, or call `snapCursorToCurrentSnappedComponent()` after setting it.
+- **File:** `Patches/ItemGrabMenuPatches.cs`
+- **Reference files:** `CHESTNAV_SPEC.md`, this TODO entry
 
 ### 14. Gift Log / Social Tab Cursor Fix
 - Cursor doesn't follow when switching tabs with LB/RB
