@@ -14,6 +14,9 @@ namespace AndroidConsolizer.Patches
     {
         private static IMonitor Monitor;
 
+        /// <summary>Side button IDs discovered by FixSnapNavigation, used by A-button handler.</summary>
+        private static HashSet<int> _sideButtonIds = new HashSet<int>();
+
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
         {
@@ -40,6 +43,12 @@ namespace AndroidConsolizer.Patches
         /// Fix snap navigation in ItemGrabMenu so trash can, organize, color picker,
         /// and fill stacks buttons are reachable via controller.
         /// Called from ModEntry.OnMenuChanged when an ItemGrabMenu opens.
+        ///
+        /// Root cause: Android's ItemGrabMenu creates sidebar buttons with runtime IDs
+        /// (e.g. 12952, 27346, 5948, 4857) but the grid slots' neighborIDs reference
+        /// hardcoded "ghost" IDs (105, 106, 54015, 54016) that don't match any component.
+        /// The organize button isn't even assigned to the organizeButton field.
+        /// This method rewires all the broken neighbor references.
         /// </summary>
         public static void FixSnapNavigation(ItemGrabMenu menu)
         {
@@ -49,55 +58,151 @@ namespace AndroidConsolizer.Patches
                 if (menu.shippingBin)
                     return;
 
-                // Collect side buttons that exist on this menu (order: top to bottom visually)
+                // Collect side buttons from field references
                 var sideButtons = new List<ClickableComponent>();
-
-                if (menu.organizeButton != null)
-                    sideButtons.Add(menu.organizeButton);
-                if (menu.colorPickerToggleButton != null)
-                    sideButtons.Add(menu.colorPickerToggleButton);
                 if (menu.fillStacksButton != null)
                     sideButtons.Add(menu.fillStacksButton);
-                if (menu.specialButton != null)
-                    sideButtons.Add(menu.specialButton);
+                if (menu.colorPickerToggleButton != null)
+                    sideButtons.Add(menu.colorPickerToggleButton);
                 if (menu.trashCan != null)
                     sideButtons.Add(menu.trashCan);
+                if (menu.organizeButton != null)
+                    sideButtons.Add(menu.organizeButton);
+                if (menu.specialButton != null)
+                    sideButtons.Add(menu.specialButton);
 
-                // Sort by Y position (top to bottom) to get correct vertical order
-                sideButtons.Sort((a, b) => a.bounds.Y.CompareTo(b.bounds.Y));
+                // The organize button often has NO field reference on Android (organizeButton=null).
+                // Scan allClickableComponents for any button on the right side (X > 1200)
+                // that isn't already in our list and isn't a grid slot or color swatch.
+                var knownIds = new HashSet<int>();
+                foreach (var btn in sideButtons)
+                    knownIds.Add(btn.myID);
+                // Also exclude grid slots and color swatches
+                if (menu.inventory?.inventory != null)
+                    foreach (var s in menu.inventory.inventory)
+                        knownIds.Add(s.myID);
+                if (menu.ItemsToGrabMenu?.inventory != null)
+                    foreach (var s in menu.ItemsToGrabMenu.inventory)
+                        knownIds.Add(s.myID);
 
-                // Log all components for debugging — dump EVERYTHING in allClickableComponents
-                if (ModEntry.Config.VerboseLogging)
+                if (menu.allClickableComponents != null)
                 {
-                    // Label which fields map to which buttons
-                    Monitor.Log($"[ChestNav] ItemGrabMenu opened. Field references:", LogLevel.Debug);
-                    Monitor.Log($"[ChestNav]   organizeButton: {(menu.organizeButton != null ? $"myID={menu.organizeButton.myID} bounds={menu.organizeButton.bounds}" : "null")}", LogLevel.Debug);
-                    Monitor.Log($"[ChestNav]   colorPickerToggleButton: {(menu.colorPickerToggleButton != null ? $"myID={menu.colorPickerToggleButton.myID} bounds={menu.colorPickerToggleButton.bounds}" : "null")}", LogLevel.Debug);
-                    Monitor.Log($"[ChestNav]   fillStacksButton: {(menu.fillStacksButton != null ? $"myID={menu.fillStacksButton.myID} bounds={menu.fillStacksButton.bounds}" : "null")}", LogLevel.Debug);
-                    Monitor.Log($"[ChestNav]   specialButton: {(menu.specialButton != null ? $"myID={menu.specialButton.myID} bounds={menu.specialButton.bounds}" : "null")}", LogLevel.Debug);
-                    Monitor.Log($"[ChestNav]   trashCan: {(menu.trashCan != null ? $"myID={menu.trashCan.myID} bounds={menu.trashCan.bounds}" : "null")}", LogLevel.Debug);
-                    Monitor.Log($"[ChestNav]   junimoNoteIcon: {(menu.junimoNoteIcon != null ? $"myID={menu.junimoNoteIcon.myID} bounds={menu.junimoNoteIcon.bounds}" : "null")}", LogLevel.Debug);
-
-                    // Dump ALL clickable components — this shows everything the game knows about
-                    Monitor.Log($"[ChestNav] === ALL clickable components ({menu.allClickableComponents?.Count ?? 0} total) ===", LogLevel.Debug);
-                    if (menu.allClickableComponents != null)
+                    foreach (var comp in menu.allClickableComponents)
                     {
-                        foreach (var comp in menu.allClickableComponents)
+                        if (knownIds.Contains(comp.myID))
+                            continue;
+                        if (comp.myID < 0) // skip offscreen placeholders (-500, etc.)
+                            continue;
+                        // Color swatches are small (80x72) and at specific Y ranges — skip them
+                        if (comp.bounds.Width <= 80 && comp.bounds.Height <= 80 && comp.bounds.X < 1200)
+                            continue;
+                        // Side buttons are on the right edge of the screen (X >= ~1290)
+                        if (comp.bounds.X >= 1200)
                         {
-                            Monitor.Log($"[ChestNav]   ALL: myID={comp.myID}, name='{comp.name}', label='{comp.label}', bounds={comp.bounds}, right={comp.rightNeighborID}, left={comp.leftNeighborID}, up={comp.upNeighborID}, down={comp.downNeighborID}", LogLevel.Debug);
+                            sideButtons.Add(comp);
+                            if (ModEntry.Config.VerboseLogging)
+                                Monitor.Log($"[ChestNav] Discovered unlisted sidebar button: myID={comp.myID}, bounds={comp.bounds}", LogLevel.Debug);
                         }
                     }
-                    Monitor.Log($"[ChestNav] === END all components ===", LogLevel.Debug);
-
-                    Monitor.Log($"[ChestNav] Side buttons we discovered: {sideButtons.Count}", LogLevel.Debug);
-                    foreach (var btn in sideButtons)
-                        Monitor.Log($"[ChestNav]   Discovered: myID={btn.myID}, bounds={btn.bounds}", LogLevel.Debug);
                 }
 
-                // v2.9.4: Diagnostic only — log everything, don't modify navigation yet.
-                // Previous wiring was based on wrong button identifications.
-                // Need full component dump to build correct fix.
-                Monitor.Log($"[ChestNav] Diagnostic mode — no navigation changes applied", LogLevel.Trace);
+                // Sort by Y position (top to bottom)
+                sideButtons.Sort((a, b) => a.bounds.Y.CompareTo(b.bounds.Y));
+
+                if (ModEntry.Config.VerboseLogging)
+                {
+                    Monitor.Log($"[ChestNav] Side buttons ({sideButtons.Count} total, sorted by Y):", LogLevel.Debug);
+                    foreach (var btn in sideButtons)
+                        Monitor.Log($"[ChestNav]   myID={btn.myID}, bounds={btn.bounds}", LogLevel.Debug);
+                }
+
+                if (sideButtons.Count == 0)
+                    return;
+
+                // === Step 1: Chain side buttons vertically ===
+                for (int i = 0; i < sideButtons.Count; i++)
+                {
+                    sideButtons[i].upNeighborID = i > 0 ? sideButtons[i - 1].myID : -1;
+                    sideButtons[i].downNeighborID = i < sideButtons.Count - 1 ? sideButtons[i + 1].myID : -1;
+                }
+
+                // === Step 2: Fix chest grid rightmost slots → sidebar buttons ===
+                // The game sets these to ghost IDs like 54015/54016 that don't exist.
+                if (menu.ItemsToGrabMenu?.inventory != null)
+                {
+                    int chestCols = DetectGridColumns(menu.ItemsToGrabMenu.inventory);
+                    if (chestCols > 0)
+                    {
+                        for (int i = chestCols - 1; i < menu.ItemsToGrabMenu.inventory.Count; i += chestCols)
+                        {
+                            var slot = menu.ItemsToGrabMenu.inventory[i];
+                            var nearest = FindNearestByY(sideButtons, slot.bounds.Center.Y);
+                            if (nearest != null)
+                            {
+                                slot.rightNeighborID = nearest.myID;
+                                // Wire back: if this slot is closer than the button's current left
+                                if (nearest.leftNeighborID < 0 || !IsValidComponent(menu, nearest.leftNeighborID))
+                                    nearest.leftNeighborID = slot.myID;
+                            }
+                        }
+                    }
+                }
+
+                // === Step 3: Fix player inventory rightmost slots → sidebar buttons ===
+                // The game sets these to ghost IDs 105/106 that don't exist.
+                if (menu.inventory?.inventory != null)
+                {
+                    int playerCols = DetectGridColumns(menu.inventory.inventory);
+                    if (playerCols > 0)
+                    {
+                        for (int i = playerCols - 1; i < menu.inventory.inventory.Count; i += playerCols)
+                        {
+                            var slot = menu.inventory.inventory[i];
+                            var nearest = FindNearestByY(sideButtons, slot.bounds.Center.Y);
+                            if (nearest != null)
+                            {
+                                slot.rightNeighborID = nearest.myID;
+                                if (nearest.leftNeighborID < 0 || !IsValidComponent(menu, nearest.leftNeighborID))
+                                    nearest.leftNeighborID = slot.myID;
+                            }
+                        }
+                    }
+                }
+
+                // === Step 4: Wire top button up to chest, bottom button down to player inventory ===
+                if (menu.ItemsToGrabMenu?.inventory != null && menu.ItemsToGrabMenu.inventory.Count > 0)
+                {
+                    var topButton = sideButtons[0];
+                    if (topButton.upNeighborID <= 0)
+                    {
+                        var nearest = FindNearestByY(menu.ItemsToGrabMenu.inventory, topButton.bounds.Center.Y);
+                        if (nearest != null)
+                            topButton.upNeighborID = nearest.myID;
+                    }
+                }
+                if (menu.inventory?.inventory != null && menu.inventory.inventory.Count > 0)
+                {
+                    var bottomButton = sideButtons[sideButtons.Count - 1];
+                    if (bottomButton.downNeighborID <= 0)
+                    {
+                        var nearest = FindNearestByY(menu.inventory.inventory, bottomButton.bounds.Center.Y);
+                        if (nearest != null)
+                            bottomButton.downNeighborID = nearest.myID;
+                    }
+                }
+
+                if (ModEntry.Config.VerboseLogging)
+                {
+                    Monitor.Log($"[ChestNav] Final wiring:", LogLevel.Debug);
+                    foreach (var btn in sideButtons)
+                        Monitor.Log($"[ChestNav]   myID={btn.myID}: left={btn.leftNeighborID}, right={btn.rightNeighborID}, up={btn.upNeighborID}, down={btn.downNeighborID}", LogLevel.Debug);
+                }
+                // Store side button IDs for the A-button handler
+                _sideButtonIds.Clear();
+                foreach (var btn in sideButtons)
+                    _sideButtonIds.Add(btn.myID);
+
+                Monitor.Log($"[ChestNav] Navigation fixed — {sideButtons.Count} side buttons wired", LogLevel.Trace);
             }
             catch (Exception ex)
             {
@@ -107,21 +212,34 @@ namespace AndroidConsolizer.Patches
             }
         }
 
-        /// <summary>Find the slot nearest to a given Y coordinate (for connecting side buttons back to grids).</summary>
-        private static ClickableComponent FindNearestSlotByY(IList<ClickableComponent> slots, int targetY)
+        /// <summary>Find the component nearest to a given Y coordinate.</summary>
+        private static ClickableComponent FindNearestByY(IList<ClickableComponent> components, int targetY)
         {
             ClickableComponent nearest = null;
             int nearestDist = int.MaxValue;
-            foreach (var slot in slots)
+            foreach (var comp in components)
             {
-                int dist = Math.Abs(slot.bounds.Center.Y - targetY);
+                int dist = Math.Abs(comp.bounds.Center.Y - targetY);
                 if (dist < nearestDist)
                 {
                     nearestDist = dist;
-                    nearest = slot;
+                    nearest = comp;
                 }
             }
             return nearest;
+        }
+
+        /// <summary>Check if a component ID actually exists in the menu's allClickableComponents.</summary>
+        private static bool IsValidComponent(ItemGrabMenu menu, int componentId)
+        {
+            if (componentId < 0 || menu.allClickableComponents == null)
+                return false;
+            foreach (var comp in menu.allClickableComponents)
+            {
+                if (comp.myID == componentId)
+                    return true;
+            }
+            return false;
         }
 
         /// <summary>Detect number of columns in a slot grid by counting slots on the first row (same Y position).</summary>
@@ -142,70 +260,6 @@ namespace AndroidConsolizer.Patches
             return cols;
         }
 
-        /// <summary>
-        /// Wire the rightmost column of a slot grid to the side buttons.
-        /// Each rightmost slot's rightNeighborID points to the vertically nearest side button.
-        /// Each connected side button's leftNeighborID points back to the nearest rightmost slot.
-        /// </summary>
-        private static void WireRightmostSlotsToButtons(IList<ClickableComponent> slots, int cols, List<ClickableComponent> sideButtons)
-        {
-            // Find the rightmost slot in each row
-            var rightmostSlots = new List<ClickableComponent>();
-            for (int i = cols - 1; i < slots.Count; i += cols)
-            {
-                rightmostSlots.Add(slots[i]);
-            }
-
-            foreach (var slot in rightmostSlots)
-            {
-                // Find the side button closest vertically to this slot
-                ClickableComponent nearest = null;
-                int nearestDist = int.MaxValue;
-                foreach (var btn in sideButtons)
-                {
-                    int dist = Math.Abs(slot.bounds.Center.Y - btn.bounds.Center.Y);
-                    if (dist < nearestDist)
-                    {
-                        nearestDist = dist;
-                        nearest = btn;
-                    }
-                }
-
-                if (nearest != null)
-                {
-                    slot.rightNeighborID = nearest.myID;
-
-                    // Also set the button's leftNeighborID to point back
-                    // Use the closest rightmost slot for each button
-                    int existingDist = int.MaxValue;
-                    if (nearest.leftNeighborID >= 0)
-                    {
-                        // Check if the existing left neighbor is closer than us
-                        foreach (var s in rightmostSlots)
-                        {
-                            if (s.myID == nearest.leftNeighborID)
-                            {
-                                existingDist = Math.Abs(s.bounds.Center.Y - nearest.bounds.Center.Y);
-                                break;
-                            }
-                        }
-                    }
-
-                    int ourDist = Math.Abs(slot.bounds.Center.Y - nearest.bounds.Center.Y);
-                    if (nearest.leftNeighborID < 0 || ourDist < existingDist)
-                    {
-                        nearest.leftNeighborID = slot.myID;
-                    }
-                }
-            }
-
-            if (ModEntry.Config.VerboseLogging)
-            {
-                foreach (var slot in rightmostSlots)
-                    Monitor.Log($"[ChestNav]   Wired slot {slot.myID} -> right={slot.rightNeighborID}", LogLevel.Debug);
-            }
-        }
-
         /// <summary>Prefix for receiveGamePadButton to handle chest management.</summary>
         /// <returns>False to block the original method (prevents Android X-delete bug), true to let it run.</returns>
         private static bool ReceiveGamePadButton_Prefix(ItemGrabMenu __instance, Buttons b)
@@ -222,6 +276,23 @@ namespace AndroidConsolizer.Patches
                 // Log all button presses in chest menu for debugging
                 if (ModEntry.Config.VerboseLogging)
                     Monitor.Log($"ItemGrabMenu button: {b} (remapped={remapped})", LogLevel.Debug);
+
+                // A button on side buttons — simulate click at button position.
+                // On Android, A fires receiveLeftClick at the mouse position which doesn't
+                // track snap navigation. We intercept and click at the correct coordinates.
+                if (remapped == Buttons.A && ModEntry.Config.EnableChestNavFix)
+                {
+                    var snapped = __instance.currentlySnappedComponent;
+                    if (snapped != null && _sideButtonIds.Contains(snapped.myID))
+                    {
+                        int cx = snapped.bounds.Center.X;
+                        int cy = snapped.bounds.Center.Y;
+                        if (ModEntry.Config.VerboseLogging)
+                            Monitor.Log($"[ChestNav] A on side button {snapped.myID} — click at ({cx},{cy})", LogLevel.Debug);
+                        __instance.receiveLeftClick(cx, cy);
+                        return false;
+                    }
+                }
 
                 // X button (after remapping) = Sort chest (and block the original to prevent deletion)
                 if (remapped == Buttons.X && ModEntry.Config.EnableSortFix)
