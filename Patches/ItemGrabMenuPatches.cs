@@ -435,13 +435,15 @@ namespace AndroidConsolizer.Patches
                 int rows = swatches.Count / cols; // should be 3
                 if (rows < 1) rows = 1;
 
-                // Use the first swatch's bounds as the anchor for the grid layout
+                // Use the first swatch's bounds as the anchor for the grid layout.
+                // Original data has all 21 swatches in a flat row at stride = width (no gap).
+                // We use the same stride to match the visual render exactly.
                 int gridX = swatches[0].bounds.X;        // leftmost X
                 int gridY = swatches[0].bounds.Y;        // baseline Y
                 int swatchW = swatches[0].bounds.Width;   // swatch width (80)
                 int swatchH = swatches[0].bounds.Height;  // swatch height (72)
-                int strideX = swatchW + 4;                // horizontal spacing
-                int strideY = swatchH + 4;                // vertical spacing
+                int strideX = swatchW;                    // horizontal spacing = width (no gap)
+                int strideY = swatchH;                    // vertical spacing = height (no gap)
 
                 _savedSwatchBounds.Clear();
 
@@ -565,28 +567,29 @@ namespace AndroidConsolizer.Patches
                         return false;
                     }
 
-                    // A on a swatch selects that color
-                    // Use the ORIGINAL swatch bounds for the click target, not the
-                    // relocated grid bounds (the game's click handler checks the original
-                    // DiscreteColorPicker layout, not our relocated snap positions).
+                    // A on a swatch selects that color.
+                    // Click the DiscreteColorPicker directly using its own coordinate
+                    // system. The picker's receiveLeftClick does hit-testing based on its
+                    // position and a 7-column grid layout. We compute the click point from
+                    // the picker's screen position and the swatch's grid row/col.
                     if (remapped == Buttons.A)
                     {
                         var snapped = __instance.currentlySnappedComponent;
                         if (snapped != null && snapped.myID >= 4343 && snapped.myID <= 4363)
                         {
-                            int cx, cy;
-                            if (_savedSwatchBounds.TryGetValue(snapped.myID, out var origBounds))
-                            {
-                                cx = origBounds.Center.X;
-                                cy = origBounds.Center.Y;
-                            }
-                            else
-                            {
-                                cx = snapped.bounds.Center.X;
-                                cy = snapped.bounds.Center.Y;
-                            }
+                            var picker = __instance.chestColorPicker;
+                            int swatchIndex = snapped.myID - 4343;
+                            int col = swatchIndex % 7;
+                            int row = swatchIndex / 7;
+                            // DiscreteColorPicker hit-tests relative to its own position
+                            // using the same swatch dimensions as the component bounds.
+                            // Use relocated bounds size (same as original).
+                            int swW = snapped.bounds.Width;
+                            int swH = snapped.bounds.Height;
+                            int cx = picker.xPositionOnScreen + col * swW + swW / 2;
+                            int cy = picker.yPositionOnScreen + row * swH + swH / 2;
                             if (ModEntry.Config.VerboseLogging)
-                                Monitor.Log($"[ChestNav] A on color swatch {snapped.myID} — click at ({cx},{cy})", LogLevel.Debug);
+                                Monitor.Log($"[ChestNav] A on color swatch {snapped.myID} (row={row},col={col}) — click at ({cx},{cy}) picker=({picker.xPositionOnScreen},{picker.yPositionOnScreen})", LogLevel.Debug);
                             __instance.receiveLeftClick(cx, cy);
                         }
                         return false;
