@@ -493,7 +493,9 @@ namespace AndroidConsolizer.Patches
 
                 _savedSwatchBounds.Clear();
 
-                // Diagnostic: probe the picker's hit-test to find exact cell boundaries
+                // Diagnostic: probe the picker's nearest-color hit-test to find midpoint boundaries.
+                // The picker selects the nearest color, so the boundary between two swatches
+                // is the midpoint of their visual centers. Two boundaries per axis → exact stride.
                 _diagnosticTapCount = 0;
                 try
                 {
@@ -503,42 +505,65 @@ namespace AndroidConsolizer.Patches
                         int savedColor = (int)colorField.GetValue(picker);
                         int probeY = gridY + 50; // safely in row 0
 
-                        // Find col 0→1 boundary: probe X from 100 to 200
-                        int colBoundary = -1;
-                        for (int px = 100; px <= 200; px++)
+                        // Find col 0→1 midpoint: probe X from 100 to 250
+                        int colMid01 = -1;
+                        for (int px = 100; px <= 250; px++)
                         {
                             colorField.SetValue(picker, -1);
                             picker.receiveLeftClick(px, probeY, false);
                             int sel = (int)colorField.GetValue(picker);
-                            if (sel == 1 && colBoundary == -1)
+                            if (sel == 1) { colMid01 = px; break; }
+                        }
+
+                        // Find col 1→2 midpoint: probe X from colMid01+20 to colMid01+200
+                        int colMid12 = -1;
+                        if (colMid01 > 0)
+                        {
+                            for (int px = colMid01 + 20; px <= colMid01 + 200; px++)
                             {
-                                colBoundary = px;
-                                break;
+                                colorField.SetValue(picker, -1);
+                                picker.receiveLeftClick(px, probeY, false);
+                                int sel = (int)colorField.GetValue(picker);
+                                if (sel == 2) { colMid12 = px; break; }
                             }
                         }
 
-                        // Find row 0→1 boundary: probe Y from 150 to 250
-                        int rowBoundary = -1;
+                        // Find row 0→1 midpoint: probe Y from 150 to 250
+                        int rowMid01 = -1;
                         int probeX = gridX + 50; // safely in col 0
                         for (int py = 150; py <= 250; py++)
                         {
                             colorField.SetValue(picker, -1);
                             picker.receiveLeftClick(probeX, py, false);
                             int sel = (int)colorField.GetValue(picker);
-                            if (sel == 7 && rowBoundary == -1) // index 7 = row 1, col 0
+                            if (sel == 7) { rowMid01 = py; break; } // index 7 = row 1, col 0
+                        }
+
+                        // Find row 1→2 midpoint: probe Y from rowMid01+20 to rowMid01+200
+                        int rowMid12 = -1;
+                        if (rowMid01 > 0)
+                        {
+                            for (int py = rowMid01 + 20; py <= rowMid01 + 200; py++)
                             {
-                                rowBoundary = py;
-                                break;
+                                colorField.SetValue(picker, -1);
+                                picker.receiveLeftClick(probeX, py, false);
+                                int sel = (int)colorField.GetValue(picker);
+                                if (sel == 14) { rowMid12 = py; break; } // index 14 = row 2, col 0
                             }
                         }
 
                         // Restore original color
                         colorField.SetValue(picker, savedColor);
 
-                        int cellW = colBoundary > 0 ? colBoundary - gridX : -1;
-                        int cellH = rowBoundary > 0 ? rowBoundary - gridY : -1;
-                        Monitor.Log($"[DIAG] PROBE: col boundary at X={colBoundary} → cellW={cellW} (from gridX={gridX})", LogLevel.Alert);
-                        Monitor.Log($"[DIAG] PROBE: row boundary at Y={rowBoundary} → cellH={cellH} (from gridY={gridY})", LogLevel.Alert);
+                        // Stride = distance between consecutive midpoints
+                        int strideXProbe = (colMid01 > 0 && colMid12 > 0) ? colMid12 - colMid01 : -1;
+                        int strideYProbe = (rowMid01 > 0 && rowMid12 > 0) ? rowMid12 - rowMid01 : -1;
+                        // First center = midpoint - stride/2
+                        int centerX0 = (strideXProbe > 0) ? colMid01 - strideXProbe / 2 : -1;
+                        int centerY0 = (strideYProbe > 0) ? rowMid01 - strideYProbe / 2 : -1;
+
+                        Monitor.Log($"[DIAG] PROBE: colMid01={colMid01} colMid12={colMid12} → strideX={strideXProbe}, firstCenterX={centerX0}", LogLevel.Alert);
+                        Monitor.Log($"[DIAG] PROBE: rowMid01={rowMid01} rowMid12={rowMid12} → strideY={strideYProbe}, firstCenterY={centerY0}", LogLevel.Alert);
                     }
                 }
                 catch (Exception ex)
