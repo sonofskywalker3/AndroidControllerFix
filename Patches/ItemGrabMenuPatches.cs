@@ -493,34 +493,57 @@ namespace AndroidConsolizer.Patches
 
                 _savedSwatchBounds.Clear();
 
-                // Diagnostic: log game constants, picker fields, and original swatch bounds
+                // Diagnostic: probe the picker's hit-test to find exact cell boundaries
                 _diagnosticTapCount = 0;
-                Monitor.Log($"[DIAG] Game1.pixelZoom={Game1.pixelZoom} Game1.tileSize={Game1.tileSize}", LogLevel.Alert);
-                Monitor.Log($"[DIAG] IClickableMenu.borderWidth={IClickableMenu.borderWidth} spaceToClearSideBorder={IClickableMenu.spaceToClearSideBorder} spaceToClearTopBorder={IClickableMenu.spaceToClearTopBorder}", LogLevel.Alert);
-                Monitor.Log($"[DIAG] Picker: pos=({gridX},{gridY}) size=({picker.width},{picker.height}) => stride=({strideX},{strideY})", LogLevel.Alert);
-
-                // Reflection dump of DiscreteColorPicker fields to find sizing constants
                 try
                 {
-                    var pickerType = picker.GetType();
-                    foreach (var field in pickerType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                    var colorField = picker.GetType().GetField("colorSelection", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (colorField != null)
                     {
-                        if (field.FieldType.IsPrimitive || field.FieldType == typeof(string) || field.FieldType.IsEnum)
+                        int savedColor = (int)colorField.GetValue(picker);
+                        int probeY = gridY + 50; // safely in row 0
+
+                        // Find col 0→1 boundary: probe X from 100 to 200
+                        int colBoundary = -1;
+                        for (int px = 100; px <= 200; px++)
                         {
-                            var val = field.GetValue(picker);
-                            Monitor.Log($"[DIAG] picker.{field.Name} ({field.FieldType.Name}) = {val}", LogLevel.Alert);
+                            colorField.SetValue(picker, -1);
+                            picker.receiveLeftClick(px, probeY, false);
+                            int sel = (int)colorField.GetValue(picker);
+                            if (sel == 1 && colBoundary == -1)
+                            {
+                                colBoundary = px;
+                                break;
+                            }
                         }
+
+                        // Find row 0→1 boundary: probe Y from 150 to 250
+                        int rowBoundary = -1;
+                        int probeX = gridX + 50; // safely in col 0
+                        for (int py = 150; py <= 250; py++)
+                        {
+                            colorField.SetValue(picker, -1);
+                            picker.receiveLeftClick(probeX, py, false);
+                            int sel = (int)colorField.GetValue(picker);
+                            if (sel == 7 && rowBoundary == -1) // index 7 = row 1, col 0
+                            {
+                                rowBoundary = py;
+                                break;
+                            }
+                        }
+
+                        // Restore original color
+                        colorField.SetValue(picker, savedColor);
+
+                        int cellW = colBoundary > 0 ? colBoundary - gridX : -1;
+                        int cellH = rowBoundary > 0 ? rowBoundary - gridY : -1;
+                        Monitor.Log($"[DIAG] PROBE: col boundary at X={colBoundary} → cellW={cellW} (from gridX={gridX})", LogLevel.Alert);
+                        Monitor.Log($"[DIAG] PROBE: row boundary at Y={rowBoundary} → cellH={cellH} (from gridY={gridY})", LogLevel.Alert);
                     }
                 }
                 catch (Exception ex)
                 {
-                    Monitor.Log($"[DIAG] Reflection failed: {ex.Message}", LogLevel.Alert);
-                }
-
-                for (int i = 0; i < swatches.Count; i++)
-                {
-                    var s = swatches[i];
-                    Monitor.Log($"[DIAG] ORIGINAL swatch[{i}] ID={s.myID} bounds=({s.bounds.X},{s.bounds.Y},{s.bounds.Width},{s.bounds.Height})", LogLevel.Alert);
+                    Monitor.Log($"[DIAG] Probe failed: {ex.Message}", LogLevel.Alert);
                 }
 
                 for (int i = 0; i < swatches.Count; i++)
