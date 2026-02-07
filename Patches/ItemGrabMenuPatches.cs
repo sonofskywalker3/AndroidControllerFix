@@ -40,6 +40,13 @@ namespace AndroidConsolizer.Patches
         /// Key is myID, value is the original bounds rectangle.</summary>
         private static Dictionary<int, Microsoft.Xna.Framework.Rectangle> _savedSwatchBounds = new Dictionary<int, Microsoft.Xna.Framework.Rectangle>();
 
+        /// <summary>Cached visual grid stride/origin from probing the picker's nearest-color hit-test.
+        /// Computed once on first picker open, reused on subsequent opens.</summary>
+        private static int _probedStrideX = -1;
+        private static int _probedStrideY = -1;
+        private static int _probedCenterX0 = -1;
+        private static int _probedCenterY0 = -1;
+
         /// <summary>Game tick when Close X was pressed. FixSnapNavigation checks this
         /// to auto-close a chest that reopened because A also fires "interact."</summary>
         private static int _closeXPressedTick = -100;
@@ -64,55 +71,12 @@ namespace AndroidConsolizer.Patches
                     prefix: new HarmonyMethod(typeof(ItemGrabMenuPatches), nameof(ReceiveGamePadButton_Prefix))
                 );
 
-                // Diagnostic: log touch coordinates and color selection when tapping on color picker swatches
-                harmony.Patch(
-                    original: AccessTools.Method(typeof(ItemGrabMenu), nameof(ItemGrabMenu.receiveLeftClick)),
-                    prefix: new HarmonyMethod(typeof(ItemGrabMenuPatches), nameof(ReceiveLeftClick_Diagnostic)),
-                    postfix: new HarmonyMethod(typeof(ItemGrabMenuPatches), nameof(ReceiveLeftClick_DiagnosticPost))
-                );
-
                 Monitor.Log("ItemGrabMenu patches applied successfully.", LogLevel.Trace);
             }
             catch (Exception ex)
             {
                 Monitor.Log($"Failed to apply ItemGrabMenu patches: {ex.Message}", LogLevel.Error);
             }
-        }
-
-        /// <summary>Diagnostic: log touch coordinates and resulting color selection.
-        /// Tap swatches to map visual positions and confirm hit-test formula.</summary>
-        private static int _diagnosticTapCount = 0;
-        private static void ReceiveLeftClick_Diagnostic(ItemGrabMenu __instance, int x, int y)
-        {
-            try
-            {
-                if (__instance.chestColorPicker != null && __instance.chestColorPicker.visible)
-                {
-                    _diagnosticTapCount++;
-                    var picker = __instance.chestColorPicker;
-                    // Read colorSelection BEFORE the click
-                    var colorField = picker.GetType().GetField("colorSelection", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    int colorBefore = colorField != null ? (int)colorField.GetValue(picker) : -1;
-                    Monitor.Log($"[DIAG] Tap #{_diagnosticTapCount} at ({x},{y}) colorBefore={colorBefore}", LogLevel.Alert);
-                }
-            }
-            catch { }
-        }
-
-        /// <summary>Diagnostic postfix: log color selection AFTER the click.</summary>
-        private static void ReceiveLeftClick_DiagnosticPost(ItemGrabMenu __instance, int x, int y)
-        {
-            try
-            {
-                if (__instance.chestColorPicker != null && __instance.chestColorPicker.visible)
-                {
-                    var picker = __instance.chestColorPicker;
-                    var colorField = picker.GetType().GetField("colorSelection", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    int colorAfter = colorField != null ? (int)colorField.GetValue(picker) : -1;
-                    Monitor.Log($"[DIAG] => colorAfter={colorAfter}", LogLevel.Alert);
-                }
-            }
-            catch { }
         }
 
         /// <summary>
@@ -479,97 +443,77 @@ namespace AndroidConsolizer.Patches
                 int rows = swatches.Count / cols; // should be 3
                 if (rows < 1) rows = 1;
 
-                // Derive the visual grid layout from the picker's own dimensions.
-                // The DiscreteColorPicker renders a 7x3 grid within its width/height,
-                // but the component bounds are wrong (flat row at Y:106). Read the
-                // picker's actual size to get the exact visual stride.
+                // The DiscreteColorPicker renders a 7x3 grid, but the component bounds
+                // are wrong (flat row at Y:106). We probe the picker's nearest-color
+                // hit-test to find the exact visual stride and grid origin. The probe
+                // runs once and caches the results for subsequent opens.
                 var picker = menu.chestColorPicker;
-                int gridX = picker.xPositionOnScreen;
-                int gridY = picker.yPositionOnScreen;
-                int strideX = picker.width / cols;
-                int strideY = picker.height / rows;
-                int swatchW = strideX;  // bounds width = stride (fill the cell)
-                int swatchH = strideY;  // bounds height = stride
 
-                _savedSwatchBounds.Clear();
-
-                // Diagnostic: probe the picker's nearest-color hit-test to find midpoint boundaries.
-                // The picker selects the nearest color, so the boundary between two swatches
-                // is the midpoint of their visual centers. Two boundaries per axis → exact stride.
-                _diagnosticTapCount = 0;
-                try
+                if (_probedStrideX < 0)
                 {
-                    var colorField = picker.GetType().GetField("colorSelection", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (colorField != null)
+                    try
                     {
-                        int savedColor = (int)colorField.GetValue(picker);
-                        int probeY = gridY + 50; // safely in row 0
-
-                        // Find col 0→1 midpoint: probe X from 100 to 250
-                        int colMid01 = -1;
-                        for (int px = 100; px <= 250; px++)
+                        var colorField = picker.GetType().GetField("colorSelection", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                        if (colorField != null)
                         {
-                            colorField.SetValue(picker, -1);
-                            picker.receiveLeftClick(px, probeY, false);
-                            int sel = (int)colorField.GetValue(picker);
-                            if (sel == 1) { colMid01 = px; break; }
-                        }
+                            int savedColor = (int)colorField.GetValue(picker);
+                            int pX = picker.xPositionOnScreen;
+                            int pY = picker.yPositionOnScreen;
+                            int probeY = pY + 50; // safely in row 0
 
-                        // Find col 1→2 midpoint: probe X from colMid01+20 to colMid01+200
-                        int colMid12 = -1;
-                        if (colMid01 > 0)
-                        {
-                            for (int px = colMid01 + 20; px <= colMid01 + 200; px++)
+                            // Find col 0→1 and col 1→2 midpoints
+                            int colMid01 = -1, colMid12 = -1;
+                            for (int px = pX; px <= pX + 300; px++)
                             {
                                 colorField.SetValue(picker, -1);
                                 picker.receiveLeftClick(px, probeY, false);
                                 int sel = (int)colorField.GetValue(picker);
-                                if (sel == 2) { colMid12 = px; break; }
+                                if (sel == 1 && colMid01 < 0) colMid01 = px;
+                                if (sel == 2 && colMid12 < 0) { colMid12 = px; break; }
                             }
-                        }
 
-                        // Find row 0→1 midpoint: probe Y from 150 to 250
-                        int rowMid01 = -1;
-                        int probeX = gridX + 50; // safely in col 0
-                        for (int py = 150; py <= 250; py++)
-                        {
-                            colorField.SetValue(picker, -1);
-                            picker.receiveLeftClick(probeX, py, false);
-                            int sel = (int)colorField.GetValue(picker);
-                            if (sel == 7) { rowMid01 = py; break; } // index 7 = row 1, col 0
-                        }
-
-                        // Find row 1→2 midpoint: probe Y from rowMid01+20 to rowMid01+200
-                        int rowMid12 = -1;
-                        if (rowMid01 > 0)
-                        {
-                            for (int py = rowMid01 + 20; py <= rowMid01 + 200; py++)
+                            // Find row 0→1 and row 1→2 midpoints
+                            int rowMid01 = -1, rowMid12 = -1;
+                            int probeX = pX + 50; // safely in col 0
+                            for (int py = pY; py <= pY + 300; py++)
                             {
                                 colorField.SetValue(picker, -1);
                                 picker.receiveLeftClick(probeX, py, false);
                                 int sel = (int)colorField.GetValue(picker);
-                                if (sel == 14) { rowMid12 = py; break; } // index 14 = row 2, col 0
+                                if (sel == 7 && rowMid01 < 0) rowMid01 = py;
+                                if (sel == 14 && rowMid12 < 0) { rowMid12 = py; break; }
+                            }
+
+                            colorField.SetValue(picker, savedColor);
+
+                            if (colMid01 > 0 && colMid12 > 0 && rowMid01 > 0 && rowMid12 > 0)
+                            {
+                                _probedStrideX = colMid12 - colMid01;
+                                _probedStrideY = rowMid12 - rowMid01;
+                                _probedCenterX0 = colMid01 - _probedStrideX / 2;
+                                _probedCenterY0 = rowMid01 - _probedStrideY / 2;
+                                if (verbose)
+                                    Monitor.Log($"[ChestNav] Probed swatch grid: stride=({_probedStrideX},{_probedStrideY}), firstCenter=({_probedCenterX0},{_probedCenterY0})", LogLevel.Debug);
+                            }
+                            else
+                            {
+                                Monitor.Log("[ChestNav] Swatch probe failed, using fallback stride", LogLevel.Warn);
                             }
                         }
-
-                        // Restore original color
-                        colorField.SetValue(picker, savedColor);
-
-                        // Stride = distance between consecutive midpoints
-                        int strideXProbe = (colMid01 > 0 && colMid12 > 0) ? colMid12 - colMid01 : -1;
-                        int strideYProbe = (rowMid01 > 0 && rowMid12 > 0) ? rowMid12 - rowMid01 : -1;
-                        // First center = midpoint - stride/2
-                        int centerX0 = (strideXProbe > 0) ? colMid01 - strideXProbe / 2 : -1;
-                        int centerY0 = (strideYProbe > 0) ? rowMid01 - strideYProbe / 2 : -1;
-
-                        Monitor.Log($"[DIAG] PROBE: colMid01={colMid01} colMid12={colMid12} → strideX={strideXProbe}, firstCenterX={centerX0}", LogLevel.Alert);
-                        Monitor.Log($"[DIAG] PROBE: rowMid01={rowMid01} rowMid12={rowMid12} → strideY={strideYProbe}, firstCenterY={centerY0}", LogLevel.Alert);
+                    }
+                    catch (Exception ex)
+                    {
+                        Monitor.Log($"[ChestNav] Swatch probe error: {ex.Message}", LogLevel.Warn);
                     }
                 }
-                catch (Exception ex)
-                {
-                    Monitor.Log($"[DIAG] Probe failed: {ex.Message}", LogLevel.Alert);
-                }
+
+                // Use probed values, or fall back to original swatch bounds stride
+                int strideX = _probedStrideX > 0 ? _probedStrideX : swatches[0].bounds.Width;
+                int strideY = _probedStrideY > 0 ? _probedStrideY : swatches[0].bounds.Height;
+                int gridOriginX = _probedCenterX0 > 0 ? _probedCenterX0 - strideX / 2 : swatches[0].bounds.X;
+                int gridOriginY = _probedCenterY0 > 0 ? _probedCenterY0 - strideY / 2 : swatches[0].bounds.Y;
+
+                _savedSwatchBounds.Clear();
 
                 for (int i = 0; i < swatches.Count; i++)
                 {
@@ -582,10 +526,10 @@ namespace AndroidConsolizer.Patches
 
                     // Relocate bounds to visual grid position
                     s.bounds = new Rectangle(
-                        gridX + col * strideX,
-                        gridY + row * strideY,
-                        swatchW,
-                        swatchH
+                        gridOriginX + col * strideX,
+                        gridOriginY + row * strideY,
+                        strideX,
+                        strideY
                     );
 
                     // Left/right within row — edges do NOT wrap or escape
@@ -610,7 +554,7 @@ namespace AndroidConsolizer.Patches
 
                 if (verbose)
                 {
-                    Monitor.Log($"[ChestNav] Wired {swatches.Count} swatches as {cols}x{rows} grid, bounds relocated (stride {strideX}x{strideY} from {gridX},{gridY})", LogLevel.Debug);
+                    Monitor.Log($"[ChestNav] Wired {swatches.Count} swatches as {cols}x{rows} grid, bounds relocated (stride {strideX}x{strideY} from {gridOriginX},{gridOriginY})", LogLevel.Debug);
                     for (int i = 0; i < swatches.Count; i++)
                     {
                         var s = swatches[i];
@@ -701,19 +645,14 @@ namespace AndroidConsolizer.Patches
                         var snapped = __instance.currentlySnappedComponent;
                         if (snapped != null && snapped.myID >= 4343 && snapped.myID <= 4363)
                         {
-                            var picker = __instance.chestColorPicker;
-                            int swatchIndex = snapped.myID - 4343;
-                            int col = swatchIndex % 7;
-                            int row = swatchIndex / 7;
-                            // DiscreteColorPicker hit-tests relative to its own position
-                            // using the same swatch dimensions as the component bounds.
-                            // Use relocated bounds size (same as original).
-                            int swW = snapped.bounds.Width;
-                            int swH = snapped.bounds.Height;
-                            int cx = picker.xPositionOnScreen + col * swW + swW / 2;
-                            int cy = picker.yPositionOnScreen + row * swH + swH / 2;
+                            // Click at the visual center of the swatch (bounds.Center).
+                            // The bounds were relocated to match the visual grid, and the
+                            // picker uses nearest-color hit-testing, so the visual center
+                            // will always select the correct color.
+                            int cx = snapped.bounds.Center.X;
+                            int cy = snapped.bounds.Center.Y;
                             if (ModEntry.Config.VerboseLogging)
-                                Monitor.Log($"[ChestNav] A on color swatch {snapped.myID} (row={row},col={col}) — click at ({cx},{cy}) picker=({picker.xPositionOnScreen},{picker.yPositionOnScreen})", LogLevel.Debug);
+                                Monitor.Log($"[ChestNav] A on color swatch {snapped.myID} — click at ({cx},{cy})", LogLevel.Debug);
                             __instance.receiveLeftClick(cx, cy);
                         }
                         return false;
