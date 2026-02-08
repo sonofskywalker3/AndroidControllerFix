@@ -80,7 +80,7 @@ namespace AndroidConsolizer.Patches
             }
 
             // Furniture debounce — separate try/catch so carpenter patches still work if this fails
-            // Android furniture pickup goes through Furniture.checkForAction, NOT performToolAction.
+            // Diagnostic: probing multiple methods to find which path ControllerX uses
             if (ModEntry.Config.EnableFurnitureDebounce)
             {
                 try
@@ -89,7 +89,19 @@ namespace AndroidConsolizer.Patches
                         original: AccessTools.Method(typeof(Furniture), nameof(Furniture.checkForAction)),
                         prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(FurnitureCheckForAction_Prefix))
                     );
-                    Monitor.Log("Furniture debounce patch applied successfully.", LogLevel.Trace);
+                    harmony.Patch(
+                        original: AccessTools.Method(typeof(Furniture), "canBeRemoved"),
+                        prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(FurnitureCanBeRemoved_Prefix))
+                    );
+                    harmony.Patch(
+                        original: AccessTools.Method(typeof(Furniture), "performRemoveAction"),
+                        prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(FurniturePerformRemoveAction_Prefix))
+                    );
+                    harmony.Patch(
+                        original: AccessTools.Method(typeof(Furniture), "placementAction"),
+                        prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(FurniturePlacementAction_Prefix))
+                    );
+                    Monitor.Log("Furniture debounce + diagnostic patches applied successfully.", LogLevel.Trace);
                 }
                 catch (Exception ex)
                 {
@@ -204,6 +216,24 @@ namespace AndroidConsolizer.Patches
             Monitor.Log($"[Furniture] ALLOWED checkForAction on '{__instance.Name}' at tick {Game1.ticks} (elapsed={elapsed})", LogLevel.Info);
             LastFurnitureActionTick = Game1.ticks;
             return true;
+        }
+
+        /// <summary>Diagnostic: log when Furniture.canBeRemoved is called.</summary>
+        private static void FurnitureCanBeRemoved_Prefix(Furniture __instance)
+        {
+            Monitor.Log($"[Furniture] canBeRemoved HIT on '{__instance.Name}' at tick {Game1.ticks}", LogLevel.Info);
+        }
+
+        /// <summary>Diagnostic: log when Furniture.performRemoveAction is called.</summary>
+        private static void FurniturePerformRemoveAction_Prefix(Furniture __instance)
+        {
+            Monitor.Log($"[Furniture] performRemoveAction HIT on '{__instance.Name}' at tick {Game1.ticks}", LogLevel.Info);
+        }
+
+        /// <summary>Diagnostic: log when Furniture.placementAction is called.</summary>
+        private static void FurniturePlacementAction_Prefix(Furniture __instance)
+        {
+            Monitor.Log($"[Furniture] placementAction HIT on '{__instance.Name}' at tick {Game1.ticks}", LogLevel.Info);
         }
     }
 }
