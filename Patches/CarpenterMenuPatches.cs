@@ -206,8 +206,9 @@ namespace AndroidConsolizer.Patches
                 return false; // Skip original — furniture cannot be removed during cooldown
             }
 
-            // Allow removal and start cooldown
-            LastFurnitureActionTick = Game1.ticks;
+            // Allow removal — cooldown is set by placementAction after the full cycle completes.
+            // canBeRemoved is called multiple times per interaction; setting cooldown here would
+            // block the second call and prevent the pickup from ever happening.
             return true; // Run original canBeRemoved
         }
 
