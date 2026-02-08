@@ -80,24 +80,16 @@ namespace AndroidConsolizer.Patches
             }
 
             // Furniture debounce — separate try/catch so carpenter patches still work if this fails
+            // Android furniture pickup goes through Furniture.checkForAction, NOT performToolAction.
             if (ModEntry.Config.EnableFurnitureDebounce)
             {
                 try
                 {
-                    // Furniture doesn't override performToolAction — it inherits from Object.
-                    // Harmony requires patching the declaring type, so patch Object and filter
-                    // to Furniture instances in the prefix.
-                    harmony.Patch(
-                        original: AccessTools.Method(typeof(StardewValley.Object), nameof(StardewValley.Object.performToolAction)),
-                        prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(FurniturePerformToolAction_Prefix))
-                    );
-                    // Diagnostic: also patch Furniture.checkForAction to see if pickup goes through there
                     harmony.Patch(
                         original: AccessTools.Method(typeof(Furniture), nameof(Furniture.checkForAction)),
                         prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(FurnitureCheckForAction_Prefix))
                     );
-
-                    Monitor.Log("Furniture debounce + diagnostic patches applied successfully.", LogLevel.Trace);
+                    Monitor.Log("Furniture debounce patch applied successfully.", LogLevel.Trace);
                 }
                 catch (Exception ex)
                 {
@@ -192,35 +184,22 @@ namespace AndroidConsolizer.Patches
         }
 
         /// <summary>
-        /// Prefix for Object.performToolAction — debounces furniture Y button rapid-toggle.
-        /// Patched on Object (the declaring type) because Furniture doesn't override this method.
-        /// Only acts on Furniture instances; all other objects pass through immediately.
+        /// Prefix for Furniture.checkForAction — debounces Y button rapid-toggle.
+        /// On Android, furniture pickup goes through checkForAction (not performToolAction).
+        /// Blocks calls within 30 ticks (~500ms) of the last successful call.
         /// </summary>
-        private static bool FurniturePerformToolAction_Prefix(StardewValley.Object __instance)
+        private static bool FurnitureCheckForAction_Prefix(Furniture __instance)
         {
-            if (__instance is not Furniture furn)
-                return true;
-
-            Monitor.Log($"[Furniture] performToolAction HIT on '{furn.Name}' at tick {Game1.ticks}", LogLevel.Info);
-
             int elapsed = Game1.ticks - LastFurnitureActionTick;
             if (elapsed < FurnitureCooldownTicks)
             {
-                Monitor.Log($"[Furniture] BLOCKED — cooldown ({elapsed}/{FurnitureCooldownTicks} ticks)", LogLevel.Info);
+                if (ModEntry.Config.VerboseLogging)
+                    Monitor.Log($"[Furniture] BLOCKED checkForAction on '{__instance.Name}' — cooldown ({elapsed}/{FurnitureCooldownTicks} ticks)", LogLevel.Debug);
                 return false;
             }
 
             LastFurnitureActionTick = Game1.ticks;
             return true;
-        }
-
-        /// <summary>
-        /// Diagnostic prefix for Furniture.checkForAction — logs to determine if furniture
-        /// pickup goes through this path instead of performToolAction on Android.
-        /// </summary>
-        private static void FurnitureCheckForAction_Prefix(Furniture __instance)
-        {
-            Monitor.Log($"[Furniture] checkForAction HIT on '{__instance.Name}' at tick {Game1.ticks}", LogLevel.Info);
         }
     }
 }
