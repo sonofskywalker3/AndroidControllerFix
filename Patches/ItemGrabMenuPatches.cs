@@ -61,6 +61,10 @@ namespace AndroidConsolizer.Patches
         private const int TransferHoldDelay = 20;   // ~333ms at 60fps before repeat starts
         private const int TransferRepeatRate = 3;    // ~50ms at 60fps between repeats
 
+        // Cached reflection fields for InventoryMenu sidebar buttons
+        private static FieldInfo _organizeButtonField;
+        private static FieldInfo _trashCanField;
+
         // Unique IDs assigned to buttons with duplicate or sentinel myIDs
         private const int ID_SORT_CHEST = 54106;    // was 106
         private const int ID_SORT_INV = 54206;       // was 106
@@ -71,6 +75,10 @@ namespace AndroidConsolizer.Patches
         public static void Apply(Harmony harmony, IMonitor monitor)
         {
             Monitor = monitor;
+
+            // Cache reflection lookups for sidebar buttons
+            _organizeButtonField = AccessTools.Field(typeof(InventoryMenu), "organizeButton");
+            _trashCanField = AccessTools.Field(typeof(InventoryMenu), "trashCan");
 
             try
             {
@@ -132,21 +140,16 @@ namespace AndroidConsolizer.Patches
                 // need (organizeButton, trashCan) aren't in that list,
                 // and IDs 105/106 are duplicated across chest/player.
                 // =====================================================
-                // InventoryMenu.organizeButton and .trashCan aren't publicly accessible
-                // in this build — use Harmony reflection to grab them by field name.
-                var organizeField = AccessTools.Field(typeof(InventoryMenu), "organizeButton");
-                var trashCanField = AccessTools.Field(typeof(InventoryMenu), "trashCan");
-
-                var sortChest = menu.ItemsToGrabMenu != null && organizeField != null
-                    ? organizeField.GetValue(menu.ItemsToGrabMenu) as ClickableComponent
+                var sortChest = menu.ItemsToGrabMenu != null && _organizeButtonField != null
+                    ? _organizeButtonField.GetValue(menu.ItemsToGrabMenu) as ClickableComponent
                     : null;                                              // ID 106, Y~86
                 var fillStacks = menu.fillStacksButton;                  // ID 12952
                 var colorToggle = menu.colorPickerToggleButton;          // ID 27346
-                var sortInv = menu.inventory != null && organizeField != null
-                    ? organizeField.GetValue(menu.inventory) as ClickableComponent
+                var sortInv = menu.inventory != null && _organizeButtonField != null
+                    ? _organizeButtonField.GetValue(menu.inventory) as ClickableComponent
                     : null;                                              // ID 106, Y~471
-                var trashPlayer = menu.inventory != null && trashCanField != null
-                    ? trashCanField.GetValue(menu.inventory) as ClickableComponent
+                var trashPlayer = menu.inventory != null && _trashCanField != null
+                    ? _trashCanField.GetValue(menu.inventory) as ClickableComponent
                     : null;                                              // ID 105, Y~673
                 var closeX = menu.upperRightCloseButton;                 // ID -500
 
