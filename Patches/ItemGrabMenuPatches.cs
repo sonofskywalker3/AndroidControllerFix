@@ -349,36 +349,6 @@ namespace AndroidConsolizer.Patches
             }
         }
 
-        /// <summary>Find the component nearest to a given Y coordinate.</summary>
-        private static ClickableComponent FindNearestByY(IList<ClickableComponent> components, int targetY)
-        {
-            ClickableComponent nearest = null;
-            int nearestDist = int.MaxValue;
-            foreach (var comp in components)
-            {
-                int dist = Math.Abs(comp.bounds.Center.Y - targetY);
-                if (dist < nearestDist)
-                {
-                    nearestDist = dist;
-                    nearest = comp;
-                }
-            }
-            return nearest;
-        }
-
-        /// <summary>Check if a component ID actually exists in the menu's allClickableComponents.</summary>
-        private static bool IsValidComponent(ItemGrabMenu menu, int componentId)
-        {
-            if (componentId < 0 || menu.allClickableComponents == null)
-                return false;
-            foreach (var comp in menu.allClickableComponents)
-            {
-                if (comp.myID == componentId)
-                    return true;
-            }
-            return false;
-        }
-
         /// <summary>Detect number of columns in a slot grid by counting slots on the first row (same Y position).</summary>
         private static int DetectGridColumns(IList<ClickableComponent> slots)
         {
@@ -1298,69 +1268,6 @@ namespace AndroidConsolizer.Patches
                 Game1.playSound("cancel");
                 if (ModEntry.Config.VerboseLogging)
                     Monitor.Log("[ChestTransfer] Chest full, cannot place 1 item", LogLevel.Debug);
-            }
-        }
-    }
-
-    /// <summary>Extension methods for SButton.</summary>
-    internal static class SButtonExtensions
-    {
-        /// <summary>Try to get the controller button equivalent.</summary>
-        public static bool TryGetController(this SButton button, out Buttons controllerButton)
-        {
-            switch (button)
-            {
-                case SButton.ControllerA:
-                    controllerButton = Buttons.A;
-                    return true;
-                case SButton.ControllerB:
-                    controllerButton = Buttons.B;
-                    return true;
-                case SButton.ControllerX:
-                    controllerButton = Buttons.X;
-                    return true;
-                case SButton.ControllerY:
-                    controllerButton = Buttons.Y;
-                    return true;
-                case SButton.ControllerBack:
-                    controllerButton = Buttons.Back;
-                    return true;
-                case SButton.ControllerStart:
-                    controllerButton = Buttons.Start;
-                    return true;
-                case SButton.LeftShoulder:
-                    controllerButton = Buttons.LeftShoulder;
-                    return true;
-                case SButton.RightShoulder:
-                    controllerButton = Buttons.RightShoulder;
-                    return true;
-                case SButton.LeftTrigger:
-                    controllerButton = Buttons.LeftTrigger;
-                    return true;
-                case SButton.RightTrigger:
-                    controllerButton = Buttons.RightTrigger;
-                    return true;
-                case SButton.LeftStick:
-                    controllerButton = Buttons.LeftStick;
-                    return true;
-                case SButton.RightStick:
-                    controllerButton = Buttons.RightStick;
-                    return true;
-                case SButton.DPadUp:
-                    controllerButton = Buttons.DPadUp;
-                    return true;
-                case SButton.DPadDown:
-                    controllerButton = Buttons.DPadDown;
-                    return true;
-                case SButton.DPadLeft:
-                    controllerButton = Buttons.DPadLeft;
-                    return true;
-                case SButton.DPadRight:
-                    controllerButton = Buttons.DPadRight;
-                    return true;
-                default:
-                    controllerButton = default;
-                    return false;
             }
         }
     }
