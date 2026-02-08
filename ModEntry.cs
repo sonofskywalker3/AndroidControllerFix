@@ -45,6 +45,11 @@ namespace AndroidConsolizer
         /// <summary>Whether the skip confirmation is pending (waiting for second press).</summary>
         private bool cutsceneSkipPending = false;
 
+        // Cached reflection for cutscene skip
+        private static FieldInfo EventSkippableField;
+        private static FieldInfo EventSkippedField;
+        private static MethodInfo EventSkipMethod;
+
         /*********
         ** Public methods
         *********/
@@ -75,6 +80,11 @@ namespace AndroidConsolizer
             helper.Events.Input.ButtonsChanged += this.OnButtonsChanged;
             helper.Events.GameLoop.UpdateTicked += this.OnUpdateTicked;
             helper.Events.Display.MenuChanged += this.OnMenuChanged;
+
+            // Cache reflection for cutscene skip
+            EventSkippableField = AccessTools.Field(typeof(Event), "skippable");
+            EventSkippedField = AccessTools.Field(typeof(Event), "skipped");
+            EventSkipMethod = AccessTools.Method(typeof(Event), "skipEvent");
 
             this.Monitor.Log("Android Consolizer loaded successfully.", LogLevel.Info);
         }
@@ -398,15 +408,10 @@ namespace AndroidConsolizer
                     return;
 
                 // Check if the event is skippable
-                var skippableField = AccessTools.Field(typeof(Event), "skippable");
-                if (skippableField == null)
-                {
-                    if (Config.VerboseLogging)
-                        this.Monitor.Log("Could not find Event.skippable field", LogLevel.Debug);
+                if (EventSkippableField == null)
                     return;
-                }
 
-                bool isSkippable = (bool)skippableField.GetValue(currentEvent);
+                bool isSkippable = (bool)EventSkippableField.GetValue(currentEvent);
                 if (!isSkippable)
                 {
                     if (Config.VerboseLogging)
@@ -421,20 +426,10 @@ namespace AndroidConsolizer
                 if (cutsceneSkipPending && ticksSinceFirstPress <= skipWindowTicks)
                 {
                     // Second press within window - skip the event
-                    var skippedField = AccessTools.Field(typeof(Event), "skipped");
-                    if (skippedField != null)
-                    {
-                        skippedField.SetValue(currentEvent, true);
-                        this.Monitor.Log("Cutscene skipped (Start pressed twice)", LogLevel.Info);
-                    }
+                    EventSkippedField?.SetValue(currentEvent, true);
+                    EventSkipMethod?.Invoke(currentEvent, null);
 
-                    // Also try calling skipEvent() method if it exists
-                    var skipMethod = AccessTools.Method(typeof(Event), "skipEvent");
-                    if (skipMethod != null)
-                    {
-                        skipMethod.Invoke(currentEvent, null);
-                    }
-
+                    this.Monitor.Log("Cutscene skipped (Start pressed twice)", LogLevel.Info);
                     cutsceneSkipPending = false;
                     cutsceneSkipFirstPressTick = -1;
                 }
