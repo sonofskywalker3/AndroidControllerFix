@@ -52,6 +52,9 @@ namespace AndroidConsolizer
         /// <summary>Whether to enable the carpenter menu fix (prevents Robin's building menu from instantly closing).</summary>
         public bool EnableCarpenterMenuFix { get; set; } = true;
 
+        /// <summary>Whether to debounce furniture Y-button interactions (prevents rapid toggle between placed and picked up).</summary>
+        public bool EnableFurnitureDebounce { get; set; } = true;
+
         /// <summary>
         /// Use bumpers (LB/RB) instead of triggers (LT/RT) for controls.
         /// Toolbar: D-Pad Up/Down switches rows, bumpers move within row.

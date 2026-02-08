@@ -891,6 +891,14 @@ namespace AndroidConsolizer
 
             configMenu.AddBoolOption(
                 mod: this.ModManifest,
+                name: () => "Furniture Debounce",
+                tooltip: () => "Prevents Y button from rapidly toggling furniture between placed and picked up. Adds ~500ms cooldown between interactions.",
+                getValue: () => Config.EnableFurnitureDebounce,
+                setValue: value => Config.EnableFurnitureDebounce = value
+            );
+
+            configMenu.AddBoolOption(
+                mod: this.ModManifest,
                 name: () => "Use Bumpers Instead of Triggers",
                 tooltip: () => "For controllers where triggers aren't detected (e.g., Xbox via Bluetooth).\n" +
                               "Toolbar: D-Pad Up/Down switches rows, LB/RB moves within row.\n" +

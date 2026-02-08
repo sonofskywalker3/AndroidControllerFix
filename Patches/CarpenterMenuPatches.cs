@@ -3,6 +3,7 @@ using HarmonyLib;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
+using StardewValley.Objects;
 
 namespace AndroidConsolizer.Patches
 {
@@ -31,6 +32,12 @@ namespace AndroidConsolizer.Patches
 
         /// <summary>Number of ticks to block input after menu opens.</summary>
         private const int GracePeriodTicks = 20;
+
+        /// <summary>Tick when Furniture.performToolAction last ran. Used for debounce.</summary>
+        private static int LastFurnitureActionTick = -100;
+
+        /// <summary>Cooldown ticks between furniture interactions (~500ms at 60fps).</summary>
+        private const int FurnitureCooldownTicks = 30;
 
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
@@ -70,6 +77,27 @@ namespace AndroidConsolizer.Patches
             catch (Exception ex)
             {
                 Monitor.Log($"Failed to apply CarpenterMenu patches: {ex.Message}", LogLevel.Error);
+            }
+
+            // Furniture debounce — separate try/catch so carpenter patches still work if this fails
+            if (ModEntry.Config.EnableFurnitureDebounce)
+            {
+                try
+                {
+                    harmony.Patch(
+                        original: AccessTools.Method(typeof(Furniture), nameof(Furniture.performToolAction)),
+                        prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(FurniturePerformToolAction_Prefix))
+                    );
+                    Monitor.Log("Furniture debounce patch applied successfully.", LogLevel.Trace);
+                }
+                catch (Exception ex)
+                {
+                    Monitor.Log($"Failed to apply furniture debounce patch: {ex.Message}", LogLevel.Error);
+                }
+            }
+            else
+            {
+                Monitor.Log("Furniture debounce is disabled in config.", LogLevel.Trace);
             }
         }
 
@@ -151,6 +179,25 @@ namespace AndroidConsolizer.Patches
                 return false;
             }
 
+            return true;
+        }
+
+        /// <summary>
+        /// Prefix for Furniture.performToolAction — debounces Y button rapid-toggle.
+        /// Blocks calls within 30 ticks (~500ms) of the last successful call.
+        /// Tools (axe, pickaxe, etc.) use different code paths and are unaffected.
+        /// </summary>
+        private static bool FurniturePerformToolAction_Prefix(Furniture __instance)
+        {
+            int elapsed = Game1.ticks - LastFurnitureActionTick;
+            if (elapsed < FurnitureCooldownTicks)
+            {
+                if (ModEntry.Config.VerboseLogging)
+                    Monitor.Log($"[Furniture] BLOCKED performToolAction — cooldown ({elapsed}/{FurnitureCooldownTicks} ticks)", LogLevel.Debug);
+                return false;
+            }
+
+            LastFurnitureActionTick = Game1.ticks;
             return true;
         }
     }
