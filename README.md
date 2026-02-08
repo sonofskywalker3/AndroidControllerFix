@@ -2,7 +2,7 @@
 
 A SMAPI mod that brings console-style controller support to Android Stardew Valley. Play with a controller like you would on Nintendo Switch - 12-slot toolbar rows, proper shop purchasing, chest management, and more.
 
-## Current Version: 3.0.0
+## Current Version: 3.1.0
 
 ## Features
 
@@ -146,17 +146,15 @@ Edit `config.json` or use Generic Mod Config Menu in-game:
 {
   "ControllerLayout": "Switch",
   "ControlStyle": "Switch",
-  "EnableShopPurchaseFix": true,
-  "EnableToolbarNavFix": true,
-  "UseBumpersInsteadOfTriggers": false,
-  "EnableSortFix": true,
-  "EnableAddToStacksFix": true,
-  "EnableChestNavFix": true,
-  "EnableChestTransferFix": true,
-  "EnableShippingBinFix": true,
-  "EnableFishingRodBaitFix": true,
-  "EnableConsoleInventoryFix": true,
+  "EnableConsoleChests": true,
+  "EnableConsoleShops": true,
+  "EnableConsoleToolbar": true,
+  "EnableConsoleInventory": true,
+  "EnableConsoleShipping": true,
+  "EnableJournalButton": true,
+  "EnableCutsceneSkip": true,
   "EnableCarpenterMenuFix": true,
+  "UseBumpersInsteadOfTriggers": false,
   "VerboseLogging": false
 }
 ```
@@ -165,17 +163,15 @@ Edit `config.json` or use Generic Mod Config Menu in-game:
 |--------|-------------|
 | `ControllerLayout` | Physical button layout: `Switch`, `Xbox`, or `PlayStation` |
 | `ControlStyle` | Control scheme: `Switch` (right=confirm) or `Xbox` (bottom=confirm) |
-| `EnableShopPurchaseFix` | A button purchases in shops |
-| `EnableToolbarNavFix` | Console-style toolbar with LB/RB/LT/RT |
-| `UseBumpersInsteadOfTriggers` | Use LB/RB instead of LT/RT (for Xbox Bluetooth controllers) |
-| `EnableSortFix` | X button sorts inventory/chests |
-| `EnableAddToStacksFix` | Y button adds to stacks in chests (fallback when not on grid slot) |
-| `EnableChestNavFix` | Sidebar buttons (sort, fill stacks, color picker, trash, close) reachable via controller |
-| `EnableChestTransferFix` | Console-style A/Y transfer + RB snap to Fill Stacks |
-| `EnableShippingBinFix` | A button stacks items in shipping bin |
-| `EnableFishingRodBaitFix` | Y button attaches/detaches bait and tackle from fishing rods |
-| `EnableConsoleInventoryFix` | Console-style A button pick up/place/swap in inventory |
+| `EnableConsoleChests` | Sort (X), fill stacks (Y), sidebar navigation, color picker, and A/Y item transfer in chests |
+| `EnableConsoleShops` | A button purchases, LT/RT quantity selector, sell tab with A/Y, right stick scroll |
+| `EnableConsoleToolbar` | 12-slot fixed toolbar with LB/RB row switching and LT/RT slot movement |
+| `EnableConsoleInventory` | A picks up/places items, Y picks up one from stack, fishing rod bait/tackle via Y |
+| `EnableConsoleShipping` | A ships full stack, Y ships one item from the shipping bin |
+| `EnableJournalButton` | Start button opens the Quest Log/Journal instead of inventory |
+| `EnableCutsceneSkip` | Press Start twice during a skippable cutscene to skip it |
 | `EnableCarpenterMenuFix` | Prevent Robin's building menu from instantly closing |
+| `UseBumpersInsteadOfTriggers` | Use LB/RB instead of LT/RT (for Xbox Bluetooth controllers) |
 | `VerboseLogging` | Enable detailed debug logging |
 
 ## Building from Source
@@ -203,7 +199,7 @@ Output: `bin/Release/net6.0/AndroidConsolizer X.X.X.zip`
 - Check SMAPI log for error messages
 
 ### Toolbar not showing 12 slots
-- Make sure `EnableToolbarNavFix` is `true` in config
+- Make sure `EnableConsoleToolbar` is `true` in config
 - The feature only works during gameplay (not in menus)
 
 ### Triggers not working (Xbox controller)
@@ -258,6 +254,14 @@ MIT License - Feel free to modify and redistribute.
 
 ## Changelog
 
+### 3.1.0
+- **Cleanup Update** - No behavior changes, internal housekeeping only
+  - Consolidated 12 granular GMCM toggles into 5 feature groups: Console Chests, Console Shops, Console Toolbar, Console Inventory, Console Shipping
+  - Removed dead code across ButtonRemapper, InventoryManagementPatches, ItemGrabMenuPatches, GameplayButtonPatches, and ModEntry
+  - Cached all per-call reflection lookups (cutscene skip, inventory hover, chest sidebar buttons) for better performance
+  - Cleaned up stale version references in log messages
+  - **Note:** Existing `config.json` files will reset to defaults due to renamed config properties. Re-configure via GMCM if needed.
+
 ### 3.0.0
 - **Console-Style Chest Item Transfer** - Chests now work like Nintendo Switch
   - **A button** instantly transfers full stack between chest and inventory (no selection step)
@@ -272,7 +276,6 @@ MIT License - Feel free to modify and redistribute.
   - B closes picker only (not the chest) via exitThisMenu same-tick guard
   - Visual stride detection probes picker at runtime for correct cursor positioning
   - Color preserved after probe (click at saved position to restore)
-- New config toggles: `EnableChestNavFix`, `EnableChestTransferFix`
 
 ### 2.9.0
 - **Shop Controls Overhaul** - Major improvements to shop controller experience
