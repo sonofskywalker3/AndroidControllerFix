@@ -84,8 +84,11 @@ namespace AndroidConsolizer.Patches
             {
                 try
                 {
+                    // Furniture doesn't override performToolAction — it inherits from Object.
+                    // Harmony requires patching the declaring type, so patch Object and filter
+                    // to Furniture instances in the prefix.
                     harmony.Patch(
-                        original: AccessTools.Method(typeof(Furniture), nameof(Furniture.performToolAction)),
+                        original: AccessTools.Method(typeof(StardewValley.Object), nameof(StardewValley.Object.performToolAction)),
                         prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(FurniturePerformToolAction_Prefix))
                     );
                     Monitor.Log("Furniture debounce patch applied successfully.", LogLevel.Trace);
@@ -183,12 +186,15 @@ namespace AndroidConsolizer.Patches
         }
 
         /// <summary>
-        /// Prefix for Furniture.performToolAction — debounces Y button rapid-toggle.
-        /// Blocks calls within 30 ticks (~500ms) of the last successful call.
-        /// Tools (axe, pickaxe, etc.) use different code paths and are unaffected.
+        /// Prefix for Object.performToolAction — debounces furniture Y button rapid-toggle.
+        /// Patched on Object (the declaring type) because Furniture doesn't override this method.
+        /// Only acts on Furniture instances; all other objects pass through immediately.
         /// </summary>
-        private static bool FurniturePerformToolAction_Prefix(Furniture __instance)
+        private static bool FurniturePerformToolAction_Prefix(StardewValley.Object __instance)
         {
+            if (__instance is not Furniture)
+                return true;
+
             int elapsed = Game1.ticks - LastFurnitureActionTick;
             if (elapsed < FurnitureCooldownTicks)
             {
