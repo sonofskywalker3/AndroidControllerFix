@@ -143,10 +143,8 @@ These need to be re-implemented **one at a time, one per 0.0.1 patch, each commi
 - **Implementation:** Patch `ItemGrabMenu` to intercept A/Y on both chest and inventory items and call the appropriate transfer method instead of the default select behavior. Use cursor-attached visual rather than red outline.
 - **DONE in v2.9.31.** A/Y intercept in `ReceiveGamePadButton_Prefix` after side-button handler. Four transfer methods handle full-stack and single-item in both directions. Config toggle: `EnableChestTransferFix`.
 
-### 7b. RB Snaps to Fill Stacks Button in Chest
-- **Console behavior:** Right bumper is a shortcut to snap the cursor to the "Add to Stacks" (Fill Stacks) sidebar button.
-- **Why needed:** v2.9.31 repurposed Y on grid slots for single-item transfer, making the previous Y=add-to-stacks shortcut effectively unreachable (cursor is almost always on a grid slot). RB restores quick access to fill stacks.
-- **Implementation:** In `ReceiveGamePadButton_Prefix`, intercept RB when `EnableChestTransferFix` is enabled. Snap cursor to `__instance.fillStacksButton` via `currentlySnappedComponent` + `snapCursorToCurrentSnappedComponent()`. Skip when color picker is open.
+### 7b. RB Snaps to Fill Stacks Button in Chest — DONE (v2.9.34)
+- RB snaps cursor to Fill Stacks button in `ReceiveGamePadButton_Prefix`. Skips when color picker is open.
 - **File:** `Patches/ItemGrabMenuPatches.cs`
 
 ### 8. Equipment Slot Placement Bug
@@ -326,32 +324,20 @@ These need to be re-implemented **one at a time, one per 0.0.1 patch, each commi
 
 ## Needs Investigation (May Be Engine-Level)
 
-### 25. Charging Tools Fire Once Before Charging (~50% of the time)
-- **Symptom:** Holding the tool button (Y on Switch layout) to charge an upgradeable tool (e.g., bronze watering can) causes the tool to fire once (single use) before the charge-up animation begins. Happens roughly half the time.
-- **Confirmed on:** v2.8.12 testing session. Bronze watering can pours a single tile before starting to charge.
-- **Confirmed mod-caused — GameplayButtonPatches X/Y swap.** Tested on v2.8.12:
-  - Switch layout (X/Y swap active): ~50% failure rate, single pour before charge starts
-  - Xbox layout (no X/Y swap): only 1 failure in many attempts, and that one was a different bug (autofire/repeated single pours while holding, not a single pour then charge)
-- **Root cause:** The `GetState_Postfix` in `GameplayButtonPatches.cs` reconstructs the entire `GamePadState` struct every frame when X/Y swap is active. The game detects "new press" vs "held" by comparing the current frame's state to the previous frame's. The reconstruction likely creates a 1-frame discontinuity — either from multiple `GetState()` calls per frame returning slightly different raw hardware data (each getting independently reconstructed), or from the new struct causing the game's press-detection to misfire. The result: the game sees a "press" (fires tool once) followed by "held" (starts charging) instead of just "held" from the start.
-- **Fix approach:** Cache the swapped `GamePadState` per frame (keyed on `Game1.ticks`). All `GetState()` calls within the same frame return the identical cached result, eliminating any intra-frame inconsistency from the reconstruction.
-- **File:** `Patches/GameplayButtonPatches.cs`
-
-### 25b. Upgraded Tool Use While Moving
-- Must stop completely to use upgraded tools
-- On Switch/PC, tools can be used while walking
-- May be engine-level Android difference
-- **Confirmed reproducible (v2.9.1 testing):** If walking and start holding the tool button, player stops moving and tool fires rapid-fire single uses instead of charging. This is NOT the same bug as #25 (which was intra-frame inconsistency fixed by caching).
-- **Switch comparison confirmed:** On Switch, starting to hold the charge button while moving begins charging immediately. Continuing to hold both charge button and joystick causes the player to hop one square at a time while charging. This hop-while-charging behavior is likely deep in the engine's tool-use state machine.
-- **Root cause hypothesis:** Android port's tool-use code path likely requires the player to be stationary before it enters the "charging" state. When movement stick is held, it falls back to repeated single-use instead. The hop-one-square behavior on Switch suggests the engine has a specific "charging while moving" mode that Android may have stripped.
-- **Deferred:** Complex engine-level investigation with uncertain scope. Prioritizing #10+#13 (chest navigation) and #7 (chest transfer) instead.
+### 25. Tool Charging Broken While Moving
+- **Symptom:** Holding the tool button while the left joystick is pressed in any direction causes the tool to rapid-fire single uses instead of charging. The player stops moving and the tool just keeps firing until the joystick is released.
+- **Expected behavior (console):** Holding the tool button while moving begins charging immediately. The player hops one square at a time while the charge builds. Releasing the button fires the charged tool.
+- **Confirmed reproducible** on v2.8.12 and v2.9.1 testing. Affects all upgradeable tools (Axe, Pickaxe, Hoe, Watering Can) at all upgrade levels with charge mechanics (Steel+).
+- **NOT mod-caused.** Earlier hypothesis blamed `GameplayButtonPatches` X/Y swap, but the issue occurs regardless of layout. This is an Android port difference — the port likely requires the player to be stationary before entering the "charging" state. When the movement stick is held, it falls back to repeated single-use.
+- **Root cause hypothesis:** Android's tool-use code path checks for movement and prevents charge state entry. The "hop one square at a time" behavior on Switch suggests the engine has a specific "charging while moving" mode that Android may have stripped or never implemented.
+- **Fix approach (v1):** Allow normal movement to continue while charging. Don't need the console hop-to-grid-center behavior for the first version.
+- **Future enhancement:** Console-style hop movement (snap to map grid center between squares) while charging. Separate patch from the basic charging-while-moving fix.
+- **Investigation needed:** Decompile the tool-use state machine. Look for where the game decides between "single use" and "start charging" — likely a check for player movement or `Farmer.isMoving()`. The fix may involve patching that check to allow charging regardless of movement state.
 - **Testing plan:** For each tool (Axe, Pickaxe, Hoe, Watering Can), at each upgrade level (Copper, Steel, Gold, Iridium):
-  - Test basic use while stationary (Y button)
-  - Test basic use while walking (hold direction + Y)
-  - Test charged/hold use while stationary (hold Y to charge, release)
-  - Test charged/hold use while walking (hold direction + hold Y)
-  - Compare each result to Switch behavior (same tool, same upgrade, same action)
+  - Test charged/hold use while stationary (hold tool button to charge, release)
+  - Test charged/hold use while walking (hold direction + hold tool button)
+  - Compare each result to Switch behavior
   - Note: Copper adds no charge mechanic, Steel = 1 charge level, Gold = 2, Iridium = 3
-  - Record: Does the action fire? Does the player stop moving? Is there a delay? Does charge level work correctly?
 
 ### 26. SMAPI / Mod Menu Button Position (G Cloud Title Screen)
 - Probably not our bug
@@ -379,11 +365,9 @@ Performance investigation (v2.7.14 session): Game starts at 60fps, degrades to ~
 - **Fix:** Store the A-button state in a static bool from `OnUpdateTicked` and read it in the draw postfix instead of re-querying the gamepad
 - **File:** `Patches/InventoryManagementPatches.cs`
 
-### O3. Cache Reflection in HandleShopBumperQuantity
-- `ModEntry.cs:HandleShopBumperQuantity` calls `AccessTools.Field()` for `inventoryVisible` and `quantityToBuy` on every bumper press instead of caching
-- Low impact (only fires on discrete button presses, not per-frame) but still worth caching for consistency
-- **Fix:** Cache fields as statics in ModEntry or reuse the cached fields from ShopMenuPatches
-- **File:** `ModEntry.cs`
+### O3. Cache Reflection in HandleShopBumperQuantity — ALREADY DONE
+- `HandleShopBumperQuantity` and `HandleShopQuantityNonBumper` call `ShopMenuPatches.AdjustQuantity()` which uses `QuantityToBuyField` and `InvVisibleField` — both cached at init in `ShopMenuPatches.Apply()` since v3.0.7-v3.0.9. No uncached reflection in these code paths.
+- **Also cached in v3.1.3:** `FillOutStacks` method in `ItemGrabMenuPatches` (was uncached in `AddToExistingStacks`).
 
 ### O4. VerboseLogging I/O Pressure
 - When VerboseLogging is enabled, every button press logs a line (`ModEntry.cs:245`), trigger values log per-tick when non-zero (`ModEntry.cs:202`), and inventory hold logging fires periodically

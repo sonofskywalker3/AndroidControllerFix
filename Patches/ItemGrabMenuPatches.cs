@@ -65,6 +65,9 @@ namespace AndroidConsolizer.Patches
         private static FieldInfo _organizeButtonField;
         private static FieldInfo _trashCanField;
 
+        // Cached reflection for FillOutStacks method (add-to-existing-stacks)
+        private static MethodInfo _fillOutStacksMethod;
+
         // Unique IDs assigned to buttons with duplicate or sentinel myIDs
         private const int ID_SORT_CHEST = 54106;    // was 106
         private const int ID_SORT_INV = 54206;       // was 106
@@ -76,9 +79,10 @@ namespace AndroidConsolizer.Patches
         {
             Monitor = monitor;
 
-            // Cache reflection lookups for sidebar buttons
+            // Cache reflection lookups for sidebar buttons and methods
             _organizeButtonField = AccessTools.Field(typeof(InventoryMenu), "organizeButton");
             _trashCanField = AccessTools.Field(typeof(InventoryMenu), "trashCan");
+            _fillOutStacksMethod = AccessTools.Method(typeof(ItemGrabMenu), "FillOutStacks");
 
             try
             {
@@ -970,13 +974,12 @@ namespace AndroidConsolizer.Patches
                 if (ModEntry.Config.VerboseLogging)
                     Monitor.Log("AddToExistingStacks called", LogLevel.Debug);
 
-                // Try calling FillOutStacks method directly
+                // Try calling FillOutStacks method directly (cached at init)
                 try
                 {
-                    var fillMethod = AccessTools.Method(typeof(ItemGrabMenu), "FillOutStacks");
-                    if (fillMethod != null)
+                    if (_fillOutStacksMethod != null)
                     {
-                        fillMethod.Invoke(menu, null);
+                        _fillOutStacksMethod.Invoke(menu, null);
                         Game1.playSound("Ship");
                         Monitor.Log("Called FillOutStacks directly", LogLevel.Info);
                         return;
