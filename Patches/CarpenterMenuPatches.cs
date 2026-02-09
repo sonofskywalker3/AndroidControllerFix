@@ -65,6 +65,9 @@ namespace AndroidConsolizer.Patches
         /// <summary>When true, GetMouseState postfix returns cursor position. Only active during receiveLeftClick.</summary>
         private static bool _overridingMousePosition = false;
 
+        /// <summary>When true, our code is calling receiveLeftClick. Prefix lets it through.</summary>
+        private static bool _weAreClicking = false;
+
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
         {
@@ -96,6 +99,14 @@ namespace AndroidConsolizer.Patches
                 harmony.Patch(
                     original: AccessTools.Method(typeof(IClickableMenu), nameof(IClickableMenu.exitThisMenu)),
                     prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(ExitThisMenu_Prefix))
+                );
+
+                // Block receiveLeftClick during farm view unless our code is calling.
+                // The game's own A-button handler fires receiveLeftClick at the old mouse
+                // position (ghost's current location), building there instead of moving the ghost.
+                harmony.Patch(
+                    original: AccessTools.Method(typeof(CarpenterMenu), nameof(CarpenterMenu.receiveLeftClick)),
+                    prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(ReceiveLeftClick_FarmBlock_Prefix))
                 );
 
                 // Cache reflection fields for farm-view cursor movement
@@ -217,6 +228,31 @@ namespace AndroidConsolizer.Patches
         private static bool IsInGracePeriod()
         {
             return MenuOpenTick >= 0 && (Game1.ticks - MenuOpenTick) < GracePeriodTicks;
+        }
+
+        /// <summary>
+        /// Prefix for CarpenterMenu.receiveLeftClick — blocks the game's own A-button-to-click
+        /// during farm view. The game fires receiveLeftClick at the old mouse position (where
+        /// the ghost currently sits), building there instead of at our cursor position.
+        /// Only our explicit calls (with _weAreClicking=true) are allowed through.
+        /// </summary>
+        private static bool ReceiveLeftClick_FarmBlock_Prefix(CarpenterMenu __instance, int x, int y)
+        {
+            if (!ModEntry.Config.EnableCarpenterMenuFix)
+                return true;
+
+            // Only intercept during farm view when our cursor is active
+            if (!_cursorActive)
+                return true;
+
+            // Allow our own calls through
+            if (_weAreClicking)
+                return true;
+
+            // Block the game's own click — we handle A presses in Update_Postfix
+            if (ModEntry.Config.VerboseLogging)
+                Monitor.Log($"[CarpenterMenu] BLOCKED game receiveLeftClick({x},{y}) — cursor active", LogLevel.Trace);
+            return false;
         }
 
         /// <summary>Prefix for CarpenterMenu.releaseLeftClick — blocks the A-button release from closing the menu.</summary>
@@ -387,15 +423,18 @@ namespace AndroidConsolizer.Patches
             // A button → simulate touch at cursor position to snap building ghost.
             // receiveLeftClick reads mouse position internally (not its x,y params) for
             // building placement, so we temporarily override GetMouseState during the call.
+            // _weAreClicking lets our call through the ReceiveLeftClick_FarmBlock_Prefix.
             var gps = Game1.input.GetGamePadState();
             bool aPressed = gps.Buttons.A == ButtonState.Pressed;
             if (aPressed && !_prevAPressed)
             {
+                _weAreClicking = true;
                 _overridingMousePosition = true;
                 __instance.receiveLeftClick((int)_cursorX, (int)_cursorY);
                 _overridingMousePosition = false;
+                _weAreClicking = false;
                 if (ModEntry.Config.VerboseLogging)
-                    Monitor.Log($"[CarpenterMenu] A pressed → receiveLeftClick({(int)_cursorX},{(int)_cursorY})", LogLevel.Debug);
+                    Monitor.Log($"[CarpenterMenu] A pressed → receiveLeftClick({(int)_cursorX},{(int)_cursorY}) zoom={Game1.options.zoomLevel} uiScale={Game1.options.uiScale}", LogLevel.Debug);
             }
             _prevAPressed = aPressed;
         }
