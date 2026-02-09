@@ -410,8 +410,12 @@ namespace AndroidConsolizer.Patches
             if (!_overridingMousePosition)
                 return;
 
+            // Cursor coords are in game units (viewport space). GetMouseState returns raw
+            // screen pixels, and the game divides by zoomLevel to get game units. Multiply
+            // by zoom so the division yields the correct game-unit position.
+            float zoom = Game1.options.zoomLevel;
             __result = new MouseState(
-                (int)_cursorX, (int)_cursorY,
+                (int)(_cursorX * zoom), (int)(_cursorY * zoom),
                 __result.ScrollWheelValue,
                 __result.LeftButton,
                 __result.MiddleButton,
