@@ -103,6 +103,16 @@ namespace AndroidConsolizer.Patches
                     prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(ExitThisMenu_Prefix))
                 );
 
+                // Block receiveGamePadButton(A) during farm view — the game's handler
+                // fires during update() BEFORE our postfix, placing the building at the
+                // ghost's old position (top-left corner) before we can move the ghost.
+                // We let receiveLeftClick through — it fires AFTER our postfix and reads
+                // our GetMouseState override for correct ghost positioning.
+                harmony.Patch(
+                    original: AccessTools.Method(typeof(CarpenterMenu), nameof(CarpenterMenu.receiveGamePadButton)),
+                    prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(ReceiveGamePadButton_Prefix))
+                );
+
                 // Cache reflection fields for farm-view cursor movement
                 OnFarmField = AccessTools.Field(typeof(CarpenterMenu), "onFarm");
                 FreezeField = AccessTools.Field(typeof(CarpenterMenu), "freeze");
@@ -225,6 +235,31 @@ namespace AndroidConsolizer.Patches
             return MenuOpenTick >= 0 && (Game1.ticks - MenuOpenTick) < GracePeriodTicks;
         }
 
+        /// <summary>
+        /// Prefix for CarpenterMenu.receiveGamePadButton — blocks A button during farm view.
+        /// The game's handler fires during update() BEFORE our postfix, and would place the
+        /// building at the ghost's old position. We block it so only receiveLeftClick (which
+        /// fires AFTER our postfix and reads our GetMouseState override) handles placement.
+        /// Other buttons (B for cancel) pass through.
+        /// </summary>
+        private static bool ReceiveGamePadButton_Prefix(CarpenterMenu __instance, Buttons b)
+        {
+            if (!ModEntry.Config.EnableCarpenterMenuFix)
+                return true;
+
+            if (!_cursorActive)
+                return true;
+
+            if (b == Buttons.A)
+            {
+                if (ModEntry.Config.VerboseLogging)
+                    Monitor.Log("[CarpenterMenu] BLOCKED receiveGamePadButton(A) — cursor active", LogLevel.Trace);
+                return false;
+            }
+
+            return true;
+        }
+
         /// <summary>Prefix for CarpenterMenu.releaseLeftClick — blocks the A-button release from closing the menu.</summary>
         private static bool ReleaseLeftClick_Prefix(CarpenterMenu __instance, int x, int y)
         {
@@ -288,6 +323,11 @@ namespace AndroidConsolizer.Patches
         /// </summary>
         private static void Update_Postfix(CarpenterMenu __instance)
         {
+            // Clear GetMouseState override from the previous frame. It was kept active so
+            // the game's own receiveLeftClick (which fires AFTER our postfix) would read
+            // our cursor coords. Now that the next frame has started, clear it.
+            _overridingMousePosition = false;
+
             // Clear cursor by default — only set when all conditions are met
             _cursorActive = false;
 
@@ -395,17 +435,20 @@ namespace AndroidConsolizer.Patches
             }
 
             // A button → snap ghost to cursor position via receiveLeftClick.
-            // GetMouseState override is active during the call so the game reads
-            // our cursor coords for ghost positioning. The game's own A handler
-            // also fires (we don't block it) — it handles actual building placement
-            // at the ghost's current position.
+            // We set _overridingMousePosition and leave it active for the rest of the
+            // frame. Our receiveLeftClick moves the ghost, then the game's own
+            // receiveLeftClick (which fires AFTER this postfix, from the A-as-touch
+            // simulation) also reads our overridden coords. receiveGamePadButton(A) is
+            // blocked by our prefix so it can't place at the ghost's old position.
+            // Override gets cleared at the START of the next frame's Update_Postfix.
             var gps = Game1.input.GetGamePadState();
             bool aPressed = gps.Buttons.A == ButtonState.Pressed;
             if (aPressed && !_prevAPressed)
             {
                 _overridingMousePosition = true;
                 __instance.receiveLeftClick((int)_cursorX, (int)_cursorY);
-                _overridingMousePosition = false;
+                // Don't clear _overridingMousePosition — game's receiveLeftClick fires
+                // after this postfix and needs to read our coords too
                 if (ModEntry.Config.VerboseLogging)
                     Monitor.Log($"[CarpenterMenu] A pressed → receiveLeftClick({(int)_cursorX},{(int)_cursorY}) zoom={Game1.options.zoomLevel} buildH={_buildingTileHeight} yOffset={_buildingTileHeight * 32}", LogLevel.Debug);
             }
