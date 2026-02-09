@@ -86,10 +86,9 @@ namespace AndroidConsolizer.Patches
         /// Tells Update_Postfix to skip the receiveLeftClick call on this frame.</summary>
         private static bool _buildPressHandled = false;
 
-        /// <summary>True after the first A press in demolish mode has gone through
-        /// receiveGamePadButton for initial building selection. Reset on menu close
-        /// and after each confirmed demolition.</summary>
-        private static bool _demolishSelectionDone = false;
+        /// <summary>Tick when the last A press was let through in demolish mode.
+        /// Prevents duplicate receiveGamePadButton calls within the same tick.</summary>
+        private static int _demolishLastATick = -1;
 
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
@@ -238,7 +237,7 @@ namespace AndroidConsolizer.Patches
             _prevAPressed = true;
             _ghostPlaced = false;
             _buildPressHandled = false;
-            _demolishSelectionDone = false;
+            _demolishLastATick = -1;
             if (ModEntry.Config.VerboseLogging)
                 Monitor.Log($"CarpenterMenu opened at tick {MenuOpenTick}. Grace period: {GracePeriodTicks} ticks.", LogLevel.Debug);
         }
@@ -258,7 +257,7 @@ namespace AndroidConsolizer.Patches
             _prevAPressed = true;
             _ghostPlaced = false;
             _buildPressHandled = false;
-            _demolishSelectionDone = false;
+            _demolishLastATick = -1;
         }
 
         /// <summary>Check if we're within the grace period after menu open.</summary>
@@ -318,19 +317,22 @@ namespace AndroidConsolizer.Patches
                         }
                     }
 
-                    // Demolish mode: let first A through for initial building selection.
-                    // After selection, two-press guard prevents accidental confirmation.
+                    // Demolish mode: always let A through to receiveGamePadButton.
+                    // receiveLeftClick can't select or demolish buildings — only
+                    // receiveGamePadButton can. Per-tick guard prevents duplicate calls.
                     bool isDemolishingVal = DemolishingField != null && (bool)DemolishingField.GetValue(__instance);
-                    if (isDemolishingVal && !_demolishSelectionDone)
+                    if (isDemolishingVal)
                     {
-                        _demolishSelectionDone = true;
+                        if (_demolishLastATick == Game1.ticks)
+                            return false; // already fired this tick
+                        _demolishLastATick = Game1.ticks;
                         _buildPressHandled = true;
                         if (ModEntry.Config.VerboseLogging)
-                            Monitor.Log("[CarpenterMenu] Demolish: initial selection → let A through", LogLevel.Debug);
+                            Monitor.Log("[CarpenterMenu] Demolish: letting A through for selection/confirm", LogLevel.Debug);
                         return true;
                     }
 
-                    // Move (building selected) / Demolish (after selection): two-press guard
+                    // Move (building selected): two-press guard
                     if (_ghostPlaced)
                     {
                         _ghostPlaced = false;
@@ -456,7 +458,6 @@ namespace AndroidConsolizer.Patches
             {
                 _cursorCentered = false;
                 _overridingMousePosition = false;
-                _demolishSelectionDone = false;
                 return;
             }
 
