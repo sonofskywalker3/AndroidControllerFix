@@ -6,6 +6,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using StardewModdingAPI;
 using StardewValley;
+using StardewValley.Buildings;
 using StardewValley.Menus;
 using StardewValley.Objects;
 
@@ -43,7 +44,7 @@ namespace AndroidConsolizer.Patches
         // --- Joystick cursor/panning fields ---
         private static FieldInfo OnFarmField;      // bool — true when showing farm view
         private static FieldInfo FreezeField;      // bool — true during animations/transitions
-        private static FieldInfo OldMouseStateField; // Game1.oldMouseState — ghost reads this for position
+        private static FieldInfo CurrentBuildingField; // Building — the building being placed
 
         private const float StickDeadzone = 0.2f;
         private const float CursorSpeedMax = 16f;  // px/tick at full tilt
@@ -66,8 +67,8 @@ namespace AndroidConsolizer.Patches
         /// <summary>When true, GetMouseState postfix returns cursor position. Only active during receiveLeftClick.</summary>
         private static bool _overridingMousePosition = false;
 
-        /// <summary>When true, our code is calling receiveLeftClick. Prefix lets it through.</summary>
-        private static bool _weAreClicking = false;
+        /// <summary>Current building's tile height, cached from Update_Postfix for use in GetMouseState_Postfix.</summary>
+        private static int _buildingTileHeight = 0;
 
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
@@ -102,27 +103,10 @@ namespace AndroidConsolizer.Patches
                     prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(ExitThisMenu_Prefix))
                 );
 
-                // Block receiveLeftClick during farm view unless our code is calling.
-                harmony.Patch(
-                    original: AccessTools.Method(typeof(CarpenterMenu), nameof(CarpenterMenu.receiveLeftClick)),
-                    prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(ReceiveLeftClick_FarmBlock_Prefix))
-                );
-
-                // Block receiveGamePadButton(A) during farm view — the game's controller
-                // handler builds at the ghost's stored position, not our cursor.
-                harmony.Patch(
-                    original: AccessTools.Method(typeof(CarpenterMenu), nameof(CarpenterMenu.receiveGamePadButton)),
-                    prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(ReceiveGamePadButton_Prefix))
-                );
-
                 // Cache reflection fields for farm-view cursor movement
                 OnFarmField = AccessTools.Field(typeof(CarpenterMenu), "onFarm");
                 FreezeField = AccessTools.Field(typeof(CarpenterMenu), "freeze");
-                OldMouseStateField = AccessTools.Field(typeof(Game1), "oldMouseState");
-                if (OldMouseStateField != null)
-                    Monitor.Log("Cached Game1.oldMouseState field.", LogLevel.Trace);
-                else
-                    Monitor.Log("WARNING: Game1.oldMouseState field not found!", LogLevel.Warn);
+                CurrentBuildingField = AccessTools.Field(typeof(CarpenterMenu), "currentBuilding");
 
                 // Postfix on update — reads left stick and moves cursor when on farm
                 harmony.Patch(
@@ -241,54 +225,6 @@ namespace AndroidConsolizer.Patches
             return MenuOpenTick >= 0 && (Game1.ticks - MenuOpenTick) < GracePeriodTicks;
         }
 
-        /// <summary>
-        /// Prefix for CarpenterMenu.receiveLeftClick — blocks the game's own A-button-to-click
-        /// during farm view. The game fires receiveLeftClick at the old mouse position (where
-        /// the ghost currently sits), building there instead of at our cursor position.
-        /// Only our explicit calls (with _weAreClicking=true) are allowed through.
-        /// </summary>
-        private static bool ReceiveLeftClick_FarmBlock_Prefix(CarpenterMenu __instance, int x, int y)
-        {
-            if (!ModEntry.Config.EnableCarpenterMenuFix)
-                return true;
-
-            // Only intercept during farm view when our cursor is active
-            if (!_cursorActive)
-                return true;
-
-            // Allow our own calls through
-            if (_weAreClicking)
-                return true;
-
-            // Block the game's own click — we handle A presses in Update_Postfix
-            if (ModEntry.Config.VerboseLogging)
-                Monitor.Log($"[CarpenterMenu] BLOCKED game receiveLeftClick({x},{y}) — cursor active", LogLevel.Trace);
-            return false;
-        }
-
-        /// <summary>
-        /// Prefix for CarpenterMenu.receiveGamePadButton — blocks A button during farm view.
-        /// The game's controller handler builds at the ghost's stored position (not our cursor).
-        /// We handle A exclusively in Update_Postfix. Other buttons (B for cancel) pass through.
-        /// </summary>
-        private static bool ReceiveGamePadButton_Prefix(CarpenterMenu __instance, Buttons b)
-        {
-            if (!ModEntry.Config.EnableCarpenterMenuFix)
-                return true;
-
-            if (!_cursorActive)
-                return true;
-
-            if (b == Buttons.A)
-            {
-                if (ModEntry.Config.VerboseLogging)
-                    Monitor.Log("[CarpenterMenu] BLOCKED game receiveGamePadButton(A) — cursor active", LogLevel.Trace);
-                return false;
-            }
-
-            return true;
-        }
-
         /// <summary>Prefix for CarpenterMenu.releaseLeftClick — blocks the A-button release from closing the menu.</summary>
         private static bool ReleaseLeftClick_Prefix(CarpenterMenu __instance, int x, int y)
         {
@@ -383,6 +319,10 @@ namespace AndroidConsolizer.Patches
             // Enable cursor — draw postfix will render it, A button will click at its position
             _cursorActive = true;
 
+            // Read current building dimensions for ghost centering in GetMouseState_Postfix
+            var building = CurrentBuildingField?.GetValue(__instance) as Building;
+            _buildingTileHeight = building?.tilesHigh.Value ?? 0;
+
             // Center cursor on first farm-view frame so building ghost starts mid-screen
             if (!_cursorCentered)
             {
@@ -454,33 +394,20 @@ namespace AndroidConsolizer.Patches
                     Monitor.Log($"[CarpenterMenu] Cursor: ({(int)_cursorX},{(int)_cursorY}) pan=({panX},{panY})", LogLevel.Trace);
             }
 
-            // Set Game1.oldMouseState to our cursor position every tick.
-            // The ghost draws at the position from oldMouseState. This runs between
-            // update() and draw(), so the ghost should see our cursor coords.
-            float zoom = Game1.options.zoomLevel;
-            if (OldMouseStateField != null)
-            {
-                OldMouseStateField.SetValue(null, new MouseState(
-                    (int)(_cursorX * zoom), (int)(_cursorY * zoom),
-                    0, ButtonState.Released, ButtonState.Released,
-                    ButtonState.Released, ButtonState.Released, ButtonState.Released
-                ));
-            }
-
-            // A button → build at cursor position. All game A-handlers are blocked
-            // (receiveLeftClick + receiveGamePadButton), so our call is the only one.
-            // _weAreClicking lets our call through the ReceiveLeftClick_FarmBlock_Prefix.
+            // A button → snap ghost to cursor position via receiveLeftClick.
+            // GetMouseState override is active during the call so the game reads
+            // our cursor coords for ghost positioning. The game's own A handler
+            // also fires (we don't block it) — it handles actual building placement
+            // at the ghost's current position.
             var gps = Game1.input.GetGamePadState();
             bool aPressed = gps.Buttons.A == ButtonState.Pressed;
             if (aPressed && !_prevAPressed)
             {
-                _weAreClicking = true;
                 _overridingMousePosition = true;
                 __instance.receiveLeftClick((int)_cursorX, (int)_cursorY);
                 _overridingMousePosition = false;
-                _weAreClicking = false;
                 if (ModEntry.Config.VerboseLogging)
-                    Monitor.Log($"[CarpenterMenu] A pressed → receiveLeftClick({(int)_cursorX},{(int)_cursorY}) zoom={zoom} uiScale={Game1.options.uiScale}", LogLevel.Debug);
+                    Monitor.Log($"[CarpenterMenu] A pressed → receiveLeftClick({(int)_cursorX},{(int)_cursorY}) zoom={Game1.options.zoomLevel} buildH={_buildingTileHeight} yOffset={_buildingTileHeight * 32}", LogLevel.Debug);
             }
             _prevAPressed = aPressed;
         }
@@ -498,9 +425,14 @@ namespace AndroidConsolizer.Patches
             // Cursor coords are in game units (viewport space). GetMouseState returns raw
             // screen pixels, and the game divides by zoomLevel to get game units. Multiply
             // by zoom so the division yields the correct game-unit position.
+            //
+            // Y offset: The ghost anchor is at the building's top-left corner, so it extends
+            // downward. Subtract half the building height (in game pixels) to center the
+            // ghost vertically on the cursor. 1 tile = 64 game pixels, half = 32.
             float zoom = Game1.options.zoomLevel;
+            float adjustedY = _cursorY - _buildingTileHeight * 32;
             __result = new MouseState(
-                (int)(_cursorX * zoom), (int)(_cursorY * zoom),
+                (int)(_cursorX * zoom), (int)(adjustedY * zoom),
                 __result.ScrollWheelValue,
                 __result.LeftButton,
                 __result.MiddleButton,
