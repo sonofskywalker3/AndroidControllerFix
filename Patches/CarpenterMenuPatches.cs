@@ -86,6 +86,11 @@ namespace AndroidConsolizer.Patches
         /// Tells Update_Postfix to skip the receiveLeftClick call on this frame.</summary>
         private static bool _buildPressHandled = false;
 
+        /// <summary>True after the first A press in demolish mode has gone through
+        /// receiveGamePadButton for initial building selection. Reset on menu close
+        /// and after each confirmed demolition.</summary>
+        private static bool _demolishSelectionDone = false;
+
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
         {
@@ -233,6 +238,7 @@ namespace AndroidConsolizer.Patches
             _prevAPressed = true;
             _ghostPlaced = false;
             _buildPressHandled = false;
+            _demolishSelectionDone = false;
             if (ModEntry.Config.VerboseLogging)
                 Monitor.Log($"CarpenterMenu opened at tick {MenuOpenTick}. Grace period: {GracePeriodTicks} ticks.", LogLevel.Debug);
         }
@@ -252,6 +258,7 @@ namespace AndroidConsolizer.Patches
             _prevAPressed = true;
             _ghostPlaced = false;
             _buildPressHandled = false;
+            _demolishSelectionDone = false;
         }
 
         /// <summary>Check if we're within the grace period after menu open.</summary>
@@ -311,7 +318,19 @@ namespace AndroidConsolizer.Patches
                         }
                     }
 
-                    // Move (building selected) / Demolish: two-press guard
+                    // Demolish mode: let first A through for initial building selection.
+                    // After selection, two-press guard prevents accidental confirmation.
+                    bool isDemolishingVal = DemolishingField != null && (bool)DemolishingField.GetValue(__instance);
+                    if (isDemolishingVal && !_demolishSelectionDone)
+                    {
+                        _demolishSelectionDone = true;
+                        _buildPressHandled = true;
+                        if (ModEntry.Config.VerboseLogging)
+                            Monitor.Log("[CarpenterMenu] Demolish: initial selection → let A through", LogLevel.Debug);
+                        return true;
+                    }
+
+                    // Move (building selected) / Demolish (after selection): two-press guard
                     if (_ghostPlaced)
                     {
                         _ghostPlaced = false;
@@ -437,6 +456,7 @@ namespace AndroidConsolizer.Patches
             {
                 _cursorCentered = false;
                 _overridingMousePosition = false;
+                _demolishSelectionDone = false;
                 return;
             }
 
@@ -592,11 +612,10 @@ namespace AndroidConsolizer.Patches
                 if (_buildPressHandled)
                 {
                     // Prefix let receiveGamePadButton(A) through — action was handled by game.
-                    // For move initial selection or confirmation: set _ghostPlaced so next A
-                    // can confirm (if cursor doesn't move). For completed actions (move placement,
-                    // demolish confirm): the game state changes and next cycle starts fresh.
+                    // Set _ghostPlaced so next A can confirm (if cursor doesn't move).
                     _buildPressHandled = false;
                     _ghostPlaced = true;
+
                     if (ModEntry.Config.VerboseLogging)
                     {
                         var btm = BuildingToMoveField?.GetValue(__instance) as Building;
