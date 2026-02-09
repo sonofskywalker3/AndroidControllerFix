@@ -45,6 +45,11 @@ namespace AndroidConsolizer.Patches
         private static FieldInfo OnFarmField;      // bool — true when showing farm view
         private static FieldInfo FreezeField;      // bool — true during animations/transitions
         private static FieldInfo CurrentBuildingField; // Building — the building being placed
+        // Mode detection: PC 1.6 uses CarpentryAction enum field "Action"; Android uses bool "moving"/"demolishing"
+        private static FieldInfo ActionField;        // PC: CarpentryAction enum (null on Android)
+        private static FieldInfo MovingField;        // Android: bool (null on PC)
+        private static FieldInfo DemolishingField;   // Android: bool (null on PC)
+        private static FieldInfo BuildingToMoveField; // Building being moved (both platforms)
 
         private const float StickDeadzone = 0.2f;
         private const float CursorSpeedMax = 16f;  // px/tick at full tilt
@@ -127,6 +132,12 @@ namespace AndroidConsolizer.Patches
                 OnFarmField = AccessTools.Field(typeof(CarpenterMenu), "onFarm");
                 FreezeField = AccessTools.Field(typeof(CarpenterMenu), "freeze");
                 CurrentBuildingField = AccessTools.Field(typeof(CarpenterMenu), "currentBuilding");
+                // Mode detection — try PC field first, fall back to Android booleans
+                ActionField = AccessTools.Field(typeof(CarpenterMenu), "Action");
+                MovingField = AccessTools.Field(typeof(CarpenterMenu), "moving");
+                DemolishingField = AccessTools.Field(typeof(CarpenterMenu), "demolishing");
+                BuildingToMoveField = AccessTools.Field(typeof(CarpenterMenu), "buildingToMove");
+                Monitor.Log($"CarpenterMenu mode fields: Action={ActionField != null}, moving={MovingField != null}, demolishing={DemolishingField != null}, buildingToMove={BuildingToMoveField != null}", LogLevel.Debug);
 
                 // Postfix on update — reads left stick and moves cursor when on farm
                 harmony.Patch(
@@ -253,11 +264,18 @@ namespace AndroidConsolizer.Patches
         /// (move, demolish) rather than using the two-press build system.</summary>
         private static bool IsClickThroughMode(CarpenterMenu instance)
         {
-            // Direct access to public field — no reflection needed.
-            // CarpentryAction enum: None=0 (build), Demolish=1, Move=2, Paint=3, Upgrade=4
-            var action = instance.Action;
-            return action == CarpenterMenu.CarpentryAction.Demolish
-                || action == CarpenterMenu.CarpentryAction.Move;
+            // PC 1.6: CarpentryAction enum field "Action" (Demolish=1, Move=2)
+            if (ActionField != null)
+            {
+                int action = (int)ActionField.GetValue(instance);
+                return action == 1 || action == 2;
+            }
+            // Android: separate bool fields "moving" and "demolishing"
+            if (MovingField != null && (bool)MovingField.GetValue(instance))
+                return true;
+            if (DemolishingField != null && (bool)DemolishingField.GetValue(instance))
+                return true;
+            return false;
         }
 
         /// <summary>
@@ -410,14 +428,26 @@ namespace AndroidConsolizer.Patches
             // In build mode: offset by currentBuilding dimensions (ghost anchor is top-left).
             // In move mode: offset by buildingToMove dimensions (only after selecting a building).
             // In demolish mode: no offset (just clicking on buildings).
-            var currentAction = __instance.Action;
-            if (currentAction == CarpenterMenu.CarpentryAction.Move)
+            bool isMoving = false, isDemolishing = false;
+            if (ActionField != null)
             {
-                var btm = __instance.buildingToMove;
+                int action = (int)ActionField.GetValue(__instance);
+                isMoving = action == 2;
+                isDemolishing = action == 1;
+            }
+            else
+            {
+                isMoving = MovingField != null && (bool)MovingField.GetValue(__instance);
+                isDemolishing = DemolishingField != null && (bool)DemolishingField.GetValue(__instance);
+            }
+
+            if (isMoving)
+            {
+                var btm = BuildingToMoveField?.GetValue(__instance) as Building;
                 _buildingTileWidth = btm?.tilesWide.Value ?? 0;
                 _buildingTileHeight = btm?.tilesHigh.Value ?? 0;
             }
-            else if (currentAction == CarpenterMenu.CarpentryAction.Demolish)
+            else if (isDemolishing)
             {
                 _buildingTileWidth = 0;
                 _buildingTileHeight = 0;
@@ -516,8 +546,8 @@ namespace AndroidConsolizer.Patches
                     __instance.receiveLeftClick((int)_cursorX, (int)_cursorY);
                     if (ModEntry.Config.VerboseLogging)
                     {
-                        var btm = __instance.buildingToMove;
-                        string mode = __instance.Action == CarpenterMenu.CarpentryAction.Move ? "MOVE" : "DEMOLISH";
+                        var btm = BuildingToMoveField?.GetValue(__instance) as Building;
+                        string mode = isMoving ? "MOVE" : "DEMOLISH";
                         Monitor.Log($"[CarpenterMenu] {mode} → receiveLeftClick({(int)_cursorX},{(int)_cursorY}) buildingToMove={btm?.buildingType.Value ?? "none"}", LogLevel.Debug);
                     }
                 }
