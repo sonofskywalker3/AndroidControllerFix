@@ -44,8 +44,13 @@ namespace AndroidConsolizer.Patches
         private static FieldInfo FreezeField;   // bool — true during animations/transitions
 
         private const float StickDeadzone = 0.2f;
-        private const float PanSpeedMax = 16f;   // px/tick at full tilt (~2x vanilla edge-pan speed of 8)
-        private const float PanSpeedMin = 2f;    // px/tick at deadzone edge
+        private const float CursorSpeedMax = 16f;  // px/tick at full tilt
+        private const float CursorSpeedMin = 2f;   // px/tick at deadzone edge
+        private const int PanEdgeMargin = 64;       // px from viewport edge to start panning
+        private const int PanSpeed = 16;             // px/tick viewport scroll at edge
+
+        /// <summary>Whether the cursor has been centered for the current farm view session.</summary>
+        private static bool _cursorCentered = false;
 
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
@@ -136,6 +141,7 @@ namespace AndroidConsolizer.Patches
         public static void OnMenuOpened()
         {
             MenuOpenTick = Game1.ticks;
+            _cursorCentered = false;
             if (ModEntry.Config.VerboseLogging)
                 Monitor.Log($"CarpenterMenu opened at tick {MenuOpenTick}. Grace period: {GracePeriodTicks} ticks.", LogLevel.Debug);
         }
@@ -150,6 +156,7 @@ namespace AndroidConsolizer.Patches
                     Monitor.Log($"CarpenterMenu closed after {duration} ticks (grace was {GracePeriodTicks}).", LogLevel.Debug);
             }
             MenuOpenTick = -1;
+            _cursorCentered = false;
         }
 
         /// <summary>Check if we're within the grace period after menu open.</summary>
@@ -214,33 +221,48 @@ namespace AndroidConsolizer.Patches
         }
 
         /// <summary>
-        /// Postfix for CarpenterMenu.update — pans the farm viewport using the left stick.
-        /// Only active when on farm view (Move/Demolish/Construct/Upgrade/Paint modes).
+        /// Postfix for CarpenterMenu.update — moves cursor with left stick, pans viewport at edges.
+        /// Console-style: stick moves the building ghost cursor around the screen. When the cursor
+        /// reaches the viewport edge, the viewport scrolls in that direction.
         /// </summary>
         private static void Update_Postfix(CarpenterMenu __instance)
         {
             if (!ModEntry.Config.EnableCarpenterMenuFix)
                 return;
 
-            // Don't pan if reflection failed
             if (OnFarmField == null || FreezeField == null)
                 return;
 
-            // Only pan when on the farm view
+            // Only active when on the farm view
             if (!(bool)OnFarmField.GetValue(__instance))
+            {
+                _cursorCentered = false;
                 return;
+            }
 
-            // Don't pan during animations/transitions
+            // Don't move during animations/transitions
             if ((bool)FreezeField.GetValue(__instance))
                 return;
 
-            // Don't pan during grace period (prevents accidental pan on menu open)
+            // Don't move during grace period
             if (IsInGracePeriod())
                 return;
 
-            // Don't pan during screen fades
+            // Don't move during screen fades
             if (Game1.IsFading())
                 return;
+
+            // Center cursor on first farm-view frame so building ghost starts mid-screen
+            if (!_cursorCentered)
+            {
+                int centerX = Game1.viewport.Width / 2;
+                int centerY = Game1.viewport.Height / 2;
+                Game1.setMousePosition(centerX, centerY);
+                _cursorCentered = true;
+                if (ModEntry.Config.VerboseLogging)
+                    Monitor.Log($"[CarpenterMenu] Centered cursor to ({centerX},{centerY})", LogLevel.Debug);
+                return;
+            }
 
             var thumbStick = GamePad.GetState(PlayerIndex.One).ThumbSticks.Left;
 
@@ -251,27 +273,48 @@ namespace AndroidConsolizer.Patches
             if (absX <= StickDeadzone && absY <= StickDeadzone)
                 return;
 
-            int panX = 0, panY = 0;
+            // Calculate cursor movement speed per axis
+            int deltaX = 0, deltaY = 0;
 
             if (absX > StickDeadzone)
             {
                 float t = (absX - StickDeadzone) / (1f - StickDeadzone);
-                float speed = PanSpeedMin + t * (PanSpeedMax - PanSpeedMin);
-                panX = (int)(Math.Sign(thumbStick.X) * speed);
+                float speed = CursorSpeedMin + t * (CursorSpeedMax - CursorSpeedMin);
+                deltaX = (int)(Math.Sign(thumbStick.X) * speed);
             }
 
             if (absY > StickDeadzone)
             {
-                // Invert Y: stick up (positive) = screen up (negative pan value)
+                // Invert Y: stick up (positive) = screen up (negative Y)
                 float t = (absY - StickDeadzone) / (1f - StickDeadzone);
-                float speed = PanSpeedMin + t * (PanSpeedMax - PanSpeedMin);
-                panY = (int)(-Math.Sign(thumbStick.Y) * speed);
+                float speed = CursorSpeedMin + t * (CursorSpeedMax - CursorSpeedMin);
+                deltaY = (int)(-Math.Sign(thumbStick.Y) * speed);
             }
 
-            Game1.panScreen(panX, panY);
+            // Move cursor, clamped to viewport bounds
+            var mousePos = Game1.getMousePosition();
+            int newX = Math.Max(0, Math.Min(mousePos.X + deltaX, Game1.viewport.Width - 1));
+            int newY = Math.Max(0, Math.Min(mousePos.Y + deltaY, Game1.viewport.Height - 1));
+            Game1.setMousePosition(newX, newY);
+
+            // Pan viewport when cursor reaches the edge
+            int panX = 0, panY = 0;
+
+            if (newX < PanEdgeMargin)
+                panX = -PanSpeed;
+            else if (newX > Game1.viewport.Width - PanEdgeMargin)
+                panX = PanSpeed;
+
+            if (newY < PanEdgeMargin)
+                panY = -PanSpeed;
+            else if (newY > Game1.viewport.Height - PanEdgeMargin)
+                panY = PanSpeed;
+
+            if (panX != 0 || panY != 0)
+                Game1.panScreen(panX, panY);
 
             if (ModEntry.Config.VerboseLogging)
-                Monitor.Log($"[CarpenterMenu] Pan: stick=({thumbStick.X:F2},{thumbStick.Y:F2}) → pan=({panX},{panY})", LogLevel.Trace);
+                Monitor.Log($"[CarpenterMenu] Cursor: ({newX},{newY}) pan=({panX},{panY})", LogLevel.Trace);
         }
 
         /// <summary>
