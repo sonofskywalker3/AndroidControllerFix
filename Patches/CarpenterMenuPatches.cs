@@ -1,5 +1,7 @@
 using System;
+using System.Reflection;
 using HarmonyLib;
+using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
 using StardewModdingAPI;
 using StardewValley;
@@ -37,6 +39,14 @@ namespace AndroidConsolizer.Patches
         /// <summary>When true, all furniture interactions are blocked until the tool button is released.</summary>
         private static bool _suppressFurnitureUntilRelease = false;
 
+        // --- Joystick panning fields ---
+        private static FieldInfo OnFarmField;   // bool — true when showing farm view
+        private static FieldInfo FreezeField;   // bool — true during animations/transitions
+
+        private const float StickDeadzone = 0.2f;
+        private const float PanSpeedMax = 16f;   // px/tick at full tilt (~2x vanilla edge-pan speed of 8)
+        private const float PanSpeedMin = 2f;    // px/tick at deadzone edge
+
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
         {
@@ -68,6 +78,17 @@ namespace AndroidConsolizer.Patches
                 harmony.Patch(
                     original: AccessTools.Method(typeof(IClickableMenu), nameof(IClickableMenu.exitThisMenu)),
                     prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(ExitThisMenu_Prefix))
+                );
+
+                // Cache reflection fields for farm-view panning
+                OnFarmField = AccessTools.Field(typeof(CarpenterMenu), "onFarm");
+                FreezeField = AccessTools.Field(typeof(CarpenterMenu), "freeze");
+
+                // Postfix on update — reads left stick and pans viewport when on farm
+                harmony.Patch(
+                    original: AccessTools.Method(typeof(CarpenterMenu), nameof(CarpenterMenu.update),
+                                                 new[] { typeof(GameTime) }),
+                    postfix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(Update_Postfix))
                 );
 
                 Monitor.Log("CarpenterMenu patches applied successfully.", LogLevel.Trace);
@@ -190,6 +211,67 @@ namespace AndroidConsolizer.Patches
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Postfix for CarpenterMenu.update — pans the farm viewport using the left stick.
+        /// Only active when on farm view (Move/Demolish/Construct/Upgrade/Paint modes).
+        /// </summary>
+        private static void Update_Postfix(CarpenterMenu __instance)
+        {
+            if (!ModEntry.Config.EnableCarpenterMenuFix)
+                return;
+
+            // Don't pan if reflection failed
+            if (OnFarmField == null || FreezeField == null)
+                return;
+
+            // Only pan when on the farm view
+            if (!(bool)OnFarmField.GetValue(__instance))
+                return;
+
+            // Don't pan during animations/transitions
+            if ((bool)FreezeField.GetValue(__instance))
+                return;
+
+            // Don't pan during grace period (prevents accidental pan on menu open)
+            if (IsInGracePeriod())
+                return;
+
+            // Don't pan during screen fades
+            if (Game1.IsFading())
+                return;
+
+            var thumbStick = GamePad.GetState(PlayerIndex.One).ThumbSticks.Left;
+
+            float absX = Math.Abs(thumbStick.X);
+            float absY = Math.Abs(thumbStick.Y);
+
+            // Both axes below deadzone — nothing to do
+            if (absX <= StickDeadzone && absY <= StickDeadzone)
+                return;
+
+            int panX = 0, panY = 0;
+
+            if (absX > StickDeadzone)
+            {
+                float t = (absX - StickDeadzone) / (1f - StickDeadzone);
+                float speed = PanSpeedMin + t * (PanSpeedMax - PanSpeedMin);
+                panX = (int)(Math.Sign(thumbStick.X) * speed);
+            }
+
+            if (absY > StickDeadzone)
+            {
+                // Invert Y: stick up (positive) = screen up (negative pan value)
+                float t = (absY - StickDeadzone) / (1f - StickDeadzone);
+                float speed = PanSpeedMin + t * (PanSpeedMax - PanSpeedMin);
+                panY = (int)(-Math.Sign(thumbStick.Y) * speed);
+            }
+
+            Game1.panScreen(panX, panY);
+
+            if (ModEntry.Config.VerboseLogging)
+                Monitor.Log($"[CarpenterMenu] Pan: stick=({thumbStick.X:F2},{thumbStick.Y:F2}) → pan=({panX},{panY})", LogLevel.Trace);
         }
 
         /// <summary>
