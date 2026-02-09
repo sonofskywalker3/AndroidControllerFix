@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using HarmonyLib;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using StardewModdingAPI;
 using StardewValley;
@@ -55,8 +56,11 @@ namespace AndroidConsolizer.Patches
         /// <summary>Tracked cursor position (sub-pixel precision, UI coordinates).</summary>
         private static float _cursorX, _cursorY;
 
-        /// <summary>When true, all mouse position reads return our cursor position.</summary>
-        private static bool _overridingMousePosition = false;
+        /// <summary>When true, cursor is visible and A button triggers clicks at cursor position.</summary>
+        private static bool _cursorActive = false;
+
+        /// <summary>Previous frame's A button state for edge detection.</summary>
+        private static bool _prevAPressed = true;
 
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
@@ -102,45 +106,18 @@ namespace AndroidConsolizer.Patches
                     postfix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(Update_Postfix))
                 );
 
+                // Postfix on draw — renders visible cursor at joystick position
+                harmony.Patch(
+                    original: AccessTools.Method(typeof(CarpenterMenu), nameof(CarpenterMenu.draw),
+                                                 new[] { typeof(SpriteBatch) }),
+                    postfix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(Draw_Postfix))
+                );
+
                 Monitor.Log("CarpenterMenu patches applied successfully.", LogLevel.Trace);
             }
             catch (Exception ex)
             {
                 Monitor.Log($"Failed to apply CarpenterMenu patches: {ex.Message}", LogLevel.Error);
-            }
-
-            // Low-level mouse state patches — CarpenterMenu reads mouse position directly
-            // from GetMouseState() (hardware layer), bypassing Game1.getMouseX/Y wrappers.
-            // Patch both Game1.input's GetMouseState and the static Mouse.GetState to cover
-            // all code paths. Postfix replaces X/Y while preserving button states.
-            try
-            {
-                // Patch the InputState.GetMouseState() on Game1.input's actual runtime type
-                var inputType = Game1.input.GetType();
-                var getMouseStateMethod = AccessTools.Method(inputType, "GetMouseState");
-                if (getMouseStateMethod != null)
-                {
-                    harmony.Patch(
-                        original: getMouseStateMethod,
-                        postfix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(GetMouseState_Postfix))
-                    );
-                    Monitor.Log($"Patched {inputType.Name}.GetMouseState postfix.", LogLevel.Trace);
-                }
-
-                // Also patch the static Mouse.GetState() — game may call XNA directly
-                var xnaMouseGetState = AccessTools.Method(typeof(Mouse), nameof(Mouse.GetState));
-                if (xnaMouseGetState != null)
-                {
-                    harmony.Patch(
-                        original: xnaMouseGetState,
-                        postfix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(GetMouseState_Postfix))
-                    );
-                    Monitor.Log("Patched Mouse.GetState postfix.", LogLevel.Trace);
-                }
-            }
-            catch (Exception ex)
-            {
-                Monitor.Log($"Failed to apply mouse state patches: {ex.Message}", LogLevel.Error);
             }
 
             // Furniture debounce — separate try/catch so carpenter patches still work if this fails
@@ -182,6 +159,7 @@ namespace AndroidConsolizer.Patches
         {
             MenuOpenTick = Game1.ticks;
             _cursorCentered = false;
+            _prevAPressed = true;
             if (ModEntry.Config.VerboseLogging)
                 Monitor.Log($"CarpenterMenu opened at tick {MenuOpenTick}. Grace period: {GracePeriodTicks} ticks.", LogLevel.Debug);
         }
@@ -197,7 +175,8 @@ namespace AndroidConsolizer.Patches
             }
             MenuOpenTick = -1;
             _cursorCentered = false;
-            _overridingMousePosition = false;
+            _cursorActive = false;
+            _prevAPressed = true;
         }
 
         /// <summary>Check if we're within the grace period after menu open.</summary>
@@ -262,15 +241,15 @@ namespace AndroidConsolizer.Patches
         }
 
         /// <summary>
-        /// Postfix for CarpenterMenu.update — moves building ghost cursor with left stick.
-        /// Console-style: stick moves the building ghost around the screen. When the cursor
-        /// reaches the viewport edge, the viewport scrolls in that direction.
-        /// Sets _overridingMousePosition so our getMouseX/Y prefixes return cursor position.
+        /// Postfix for CarpenterMenu.update — moves joystick cursor with left stick.
+        /// Stick moves a visible cursor around the screen. When the cursor reaches the
+        /// viewport edge, the viewport scrolls. A button fires receiveLeftClick at cursor
+        /// position to snap the building ghost there (same as a touch tap).
         /// </summary>
         private static void Update_Postfix(CarpenterMenu __instance)
         {
-            // Clear override by default — only set when all conditions are met
-            _overridingMousePosition = false;
+            // Clear cursor by default — only set when all conditions are met
+            _cursorActive = false;
 
             if (!ModEntry.Config.EnableCarpenterMenuFix)
                 return;
@@ -297,9 +276,8 @@ namespace AndroidConsolizer.Patches
             if (Game1.IsFading())
                 return;
 
-            // Enable mouse position override — stays true until next update postfix clears it.
-            // This means draw() calls to getMouseX/Y will return our cursor position.
-            _overridingMousePosition = true;
+            // Enable cursor — draw postfix will render it, A button will click at its position
+            _cursorActive = true;
 
             // Center cursor on first farm-view frame so building ghost starts mid-screen
             if (!_cursorCentered)
@@ -317,83 +295,92 @@ namespace AndroidConsolizer.Patches
             float absX = Math.Abs(thumbStick.X);
             float absY = Math.Abs(thumbStick.Y);
 
-            // Both axes below deadzone — keep cursor at current position (override still active)
-            if (absX <= StickDeadzone && absY <= StickDeadzone)
-                return;
-
-            // Calculate cursor movement per axis
-            float deltaX = 0f, deltaY = 0f;
-
-            if (absX > StickDeadzone)
+            // Move cursor if stick is above deadzone
+            if (absX > StickDeadzone || absY > StickDeadzone)
             {
-                float t = (absX - StickDeadzone) / (1f - StickDeadzone);
-                float speed = CursorSpeedMin + t * (CursorSpeedMax - CursorSpeedMin);
-                deltaX = Math.Sign(thumbStick.X) * speed;
+                float deltaX = 0f, deltaY = 0f;
+
+                if (absX > StickDeadzone)
+                {
+                    float t = (absX - StickDeadzone) / (1f - StickDeadzone);
+                    float speed = CursorSpeedMin + t * (CursorSpeedMax - CursorSpeedMin);
+                    deltaX = Math.Sign(thumbStick.X) * speed;
+                }
+
+                if (absY > StickDeadzone)
+                {
+                    // Invert Y: stick up (positive) = screen up (negative Y)
+                    float t = (absY - StickDeadzone) / (1f - StickDeadzone);
+                    float speed = CursorSpeedMin + t * (CursorSpeedMax - CursorSpeedMin);
+                    deltaY = -Math.Sign(thumbStick.Y) * speed;
+                }
+
+                _cursorX = Math.Max(0, Math.Min(_cursorX + deltaX, Game1.viewport.Width - 1));
+                _cursorY = Math.Max(0, Math.Min(_cursorY + deltaY, Game1.viewport.Height - 1));
+
+                int ix = (int)_cursorX;
+                int iy = (int)_cursorY;
+
+                int panX = 0, panY = 0;
+
+                if (ix < PanEdgeMargin)
+                    panX = -PanSpeed;
+                else if (ix > Game1.viewport.Width - PanEdgeMargin)
+                    panX = PanSpeed;
+
+                if (iy < PanEdgeMargin)
+                    panY = -PanSpeed;
+                else if (iy > Game1.viewport.Height - PanEdgeMargin)
+                    panY = PanSpeed;
+
+                if (panX != 0 || panY != 0)
+                {
+                    Game1.panScreen(panX, panY);
+
+                    // Compensate cursor for viewport movement — keeps cursor at the same
+                    // world position. Without this, the cursor sticks to the screen edge
+                    // and panning continues even after the stick changes direction.
+                    _cursorX -= panX;
+                    _cursorY -= panY;
+                    _cursorX = Math.Max(0, Math.Min(_cursorX, Game1.viewport.Width - 1));
+                    _cursorY = Math.Max(0, Math.Min(_cursorY, Game1.viewport.Height - 1));
+                }
+
+                if (ModEntry.Config.VerboseLogging)
+                    Monitor.Log($"[CarpenterMenu] Cursor: ({(int)_cursorX},{(int)_cursorY}) pan=({panX},{panY})", LogLevel.Trace);
             }
 
-            if (absY > StickDeadzone)
+            // A button → simulate touch at cursor position to snap building ghost
+            var gps = Game1.input.GetGamePadState();
+            bool aPressed = gps.Buttons.A == ButtonState.Pressed;
+            if (aPressed && !_prevAPressed)
             {
-                // Invert Y: stick up (positive) = screen up (negative Y)
-                float t = (absY - StickDeadzone) / (1f - StickDeadzone);
-                float speed = CursorSpeedMin + t * (CursorSpeedMax - CursorSpeedMin);
-                deltaY = -Math.Sign(thumbStick.Y) * speed;
+                __instance.receiveLeftClick((int)_cursorX, (int)_cursorY);
+                if (ModEntry.Config.VerboseLogging)
+                    Monitor.Log($"[CarpenterMenu] A pressed → receiveLeftClick({(int)_cursorX},{(int)_cursorY})", LogLevel.Debug);
             }
-
-            // Move cursor, clamped to viewport bounds
-            _cursorX = Math.Max(0, Math.Min(_cursorX + deltaX, Game1.viewport.Width - 1));
-            _cursorY = Math.Max(0, Math.Min(_cursorY + deltaY, Game1.viewport.Height - 1));
-
-            int ix = (int)_cursorX;
-            int iy = (int)_cursorY;
-
-            // Pan viewport when cursor reaches the edge
-            int panX = 0, panY = 0;
-
-            if (ix < PanEdgeMargin)
-                panX = -PanSpeed;
-            else if (ix > Game1.viewport.Width - PanEdgeMargin)
-                panX = PanSpeed;
-
-            if (iy < PanEdgeMargin)
-                panY = -PanSpeed;
-            else if (iy > Game1.viewport.Height - PanEdgeMargin)
-                panY = PanSpeed;
-
-            if (panX != 0 || panY != 0)
-            {
-                Game1.panScreen(panX, panY);
-
-                // Compensate cursor for viewport movement — keeps cursor at the same
-                // world position. Without this, the cursor sticks to the screen edge
-                // and panning continues even after the stick changes direction.
-                _cursorX -= panX;
-                _cursorY -= panY;
-                _cursorX = Math.Max(0, Math.Min(_cursorX, Game1.viewport.Width - 1));
-                _cursorY = Math.Max(0, Math.Min(_cursorY, Game1.viewport.Height - 1));
-            }
-
-            if (ModEntry.Config.VerboseLogging)
-                Monitor.Log($"[CarpenterMenu] Cursor: ({(int)_cursorX},{(int)_cursorY}) pan=({panX},{panY})", LogLevel.Trace);
+            _prevAPressed = aPressed;
         }
 
         /// <summary>
-        /// Harmony postfix for GetMouseState (both InputState and Mouse.GetState).
-        /// Replaces X/Y in the returned MouseState with our cursor position while
-        /// preserving all button states. Only active during CarpenterMenu farm view.
+        /// Postfix for CarpenterMenu.draw — draws a visible cursor at the joystick
+        /// position when on the farm view. Shows where A button will click.
         /// </summary>
-        private static void GetMouseState_Postfix(ref MouseState __result)
+        private static void Draw_Postfix(CarpenterMenu __instance, SpriteBatch b)
         {
-            if (!_overridingMousePosition)
+            if (!_cursorActive)
                 return;
 
-            __result = new MouseState(
-                (int)_cursorX, (int)_cursorY,
-                __result.ScrollWheelValue,
-                __result.LeftButton,
-                __result.MiddleButton,
-                __result.RightButton,
-                __result.XButton1,
-                __result.XButton2
+            b.Draw(
+                Game1.mouseCursors,
+                new Vector2(_cursorX, _cursorY),
+                Game1.getSourceRectForStandardTileSheet(Game1.mouseCursors, 0, 16, 16),
+                Color.White,
+                0f,
+                Vector2.Zero,
+                4f + Game1.dialogueButtonScale / 150f,
+                SpriteEffects.None,
+                1f
             );
         }
 
