@@ -53,6 +53,11 @@ namespace AndroidConsolizer.Patches
         // Cached A-button state from OnUpdateTicked — avoids redundant GamePad.GetState() in draw postfix
         private static bool CachedAButtonDown = false;
 
+        // When HandleAButton declines to process a non-inventory slot (equipment, sort, trash),
+        // this flag tells the prefix patches in InventoryPagePatches to let the A press through
+        // to the game's own handler. Cleared each tick in OnUpdateTicked.
+        public static bool AllowGameAPress = false;
+
         // Cached reflection fields for hover/tooltip (avoids per-tick AccessTools.Field lookups)
         private static FieldInfo InvPage_HoverTextField;
         private static FieldInfo InvPage_HoverTitleField;
@@ -299,6 +304,20 @@ namespace AndroidConsolizer.Patches
             {
                 TriggerHoverTooltip();
             }
+
+            // Sync holding state: if we think we're holding but CursorSlotItem is gone,
+            // the game consumed it (e.g. equipped to an equipment slot, trashed it).
+            if (IsHoldingItem && Game1.player.CursorSlotItem == null)
+            {
+                if (ModEntry.Config.VerboseLogging)
+                    Monitor?.Log("InventoryManagement: CursorSlotItem cleared externally, syncing hold state", LogLevel.Debug);
+                IsHoldingItem = false;
+                SourceSlotId = -1;
+            }
+
+            // Clear the pass-through flag. It was set during HandleAButton (via OnButtonsChanged)
+            // and consumed by prefix patches during this tick's input processing.
+            AllowGameAPress = false;
         }
 
         /// <summary>
@@ -453,7 +472,8 @@ namespace AndroidConsolizer.Patches
                     if (!isInventorySlot)
                     {
                         if (ModEntry.Config.VerboseLogging)
-                            Monitor.Log($"InventoryManagement: Slot {slotId} is not inventory slot, ignoring", LogLevel.Debug);
+                            Monitor.Log($"InventoryManagement: Slot {slotId} is not inventory slot, passing through to game", LogLevel.Debug);
+                        AllowGameAPress = true;
                         return false;
                     }
 
@@ -624,11 +644,13 @@ namespace AndroidConsolizer.Patches
                     Monitor.Log($"InventoryManagement: Placing {heldItem.Name} at slot {targetSlotId}", LogLevel.Debug);
 
                 // Handle non-inventory slots (equipment slots, trash, etc.)
+                // Let the game's own handler process these — it knows how to equip items,
+                // trash held items, etc. when CursorSlotItem is set.
                 if (!isInventorySlot)
                 {
-                    // For now, don't handle equipment slots - let game handle it
                     if (ModEntry.Config.VerboseLogging)
-                        Monitor.Log($"InventoryManagement: Target slot {targetSlotId} is not inventory, ignoring", LogLevel.Debug);
+                        Monitor.Log($"InventoryManagement: Target slot {targetSlotId} is not inventory, passing through to game", LogLevel.Debug);
+                    AllowGameAPress = true;
                     return false;
                 }
 

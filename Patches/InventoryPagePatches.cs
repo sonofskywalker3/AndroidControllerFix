@@ -83,10 +83,17 @@ namespace AndroidConsolizer.Patches
                     Monitor.Log($"GameMenu (inventory) button: {b} (remapped={remapped})", LogLevel.Debug);
 
                 // Block A button when console inventory is enabled - we handle it ourselves
+                // EXCEPT when AllowGameAPress is set (non-inventory slot like equipment, sort, trash)
                 if (ModEntry.Config.EnableConsoleInventory)
                 {
                     if (b == Buttons.A || remapped == Buttons.A)
                     {
+                        if (InventoryManagementPatches.AllowGameAPress)
+                        {
+                            if (ModEntry.Config.VerboseLogging)
+                                Monitor.Log($"Allowing A button through for non-inventory slot (GameMenu)", LogLevel.Debug);
+                            return true;
+                        }
                         if (ModEntry.Config.VerboseLogging)
                             Monitor.Log($"Blocking A button in GameMenu inventory (console inventory mode)", LogLevel.Debug);
                         return false;
@@ -134,11 +141,17 @@ namespace AndroidConsolizer.Patches
                     Monitor.Log($"InventoryPage button: {b} (remapped={remapped})", LogLevel.Debug);
 
                 // Block A button when console inventory is enabled - we handle it ourselves
-                // This prevents the default selection box and tooltip behavior
+                // EXCEPT when AllowGameAPress is set (non-inventory slot like equipment, sort, trash)
                 if (ModEntry.Config.EnableConsoleInventory)
                 {
                     if (b == Buttons.A || remapped == Buttons.A)
                     {
+                        if (InventoryManagementPatches.AllowGameAPress)
+                        {
+                            if (ModEntry.Config.VerboseLogging)
+                                Monitor.Log($"Allowing A button through for non-inventory slot (InventoryPage)", LogLevel.Debug);
+                            return true;
+                        }
                         if (ModEntry.Config.VerboseLogging)
                             Monitor.Log($"Blocking A button in InventoryPage (console inventory mode)", LogLevel.Debug);
                         return false;
@@ -180,10 +193,17 @@ namespace AndroidConsolizer.Patches
                 Buttons remapped = ButtonRemapper.Remap(b);
 
                 // Block A button when console inventory is enabled
+                // EXCEPT when AllowGameAPress is set (non-inventory slot like equipment, sort, trash)
                 if (ModEntry.Config.EnableConsoleInventory)
                 {
                     if (b == Buttons.A || remapped == Buttons.A)
                     {
+                        if (InventoryManagementPatches.AllowGameAPress)
+                        {
+                            if (ModEntry.Config.VerboseLogging)
+                                Monitor.Log($"Allowing A button through for non-inventory slot (InventoryMenu)", LogLevel.Debug);
+                            return true;
+                        }
                         if (ModEntry.Config.VerboseLogging)
                             Monitor.Log($"Blocking A button in InventoryMenu (console inventory mode)", LogLevel.Debug);
                         return false;
@@ -211,6 +231,9 @@ namespace AndroidConsolizer.Patches
                 GamePadState gpState = GamePad.GetState(Microsoft.Xna.Framework.PlayerIndex.One);
                 if (gpState.Buttons.A == ButtonState.Pressed)
                 {
+                    // Let the game handle non-inventory slots (equipment, sort, trash)
+                    if (InventoryManagementPatches.AllowGameAPress)
+                        return true;
                     if (ModEntry.Config.VerboseLogging)
                         Monitor.Log($"Blocking leftClickHeld while A is pressed (console inventory mode)", LogLevel.Debug);
                     return false;
@@ -231,6 +254,13 @@ namespace AndroidConsolizer.Patches
                 GamePadState gpState = GamePad.GetState(Microsoft.Xna.Framework.PlayerIndex.One);
                 if (gpState.Buttons.A == ButtonState.Pressed)
                 {
+                    // Let the game handle non-inventory slots (equipment, sort, trash)
+                    if (InventoryManagementPatches.AllowGameAPress)
+                    {
+                        if (ModEntry.Config.VerboseLogging)
+                            Monitor.Log($"Allowing receiveLeftClick through for non-inventory slot", LogLevel.Debug);
+                        return true;
+                    }
                     if (ModEntry.Config.VerboseLogging)
                         Monitor.Log($"Blocking receiveLeftClick while A is pressed (console inventory mode)", LogLevel.Debug);
                     return false;
@@ -250,6 +280,13 @@ namespace AndroidConsolizer.Patches
                 GamePadState gpState = GamePad.GetState(Microsoft.Xna.Framework.PlayerIndex.One);
                 if (gpState.Buttons.A == ButtonState.Pressed)
                 {
+                    // Let the game handle non-inventory slots (equipment, sort, trash)
+                    if (InventoryManagementPatches.AllowGameAPress)
+                    {
+                        if (ModEntry.Config.VerboseLogging)
+                            Monitor.Log($"Allowing InventoryMenu.receiveLeftClick through for non-inventory slot", LogLevel.Debug);
+                        return true;
+                    }
                     if (ModEntry.Config.VerboseLogging)
                         Monitor.Log($"Blocking InventoryMenu.receiveLeftClick while A is pressed", LogLevel.Debug);
                     return false;
