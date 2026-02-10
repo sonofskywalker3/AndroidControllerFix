@@ -7,6 +7,7 @@ using Microsoft.Xna.Framework.Input;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
+using StardewValley.Objects;
 using StardewValley.Tools;
 
 namespace AndroidConsolizer.Patches
@@ -644,39 +645,40 @@ namespace AndroidConsolizer.Patches
                     Monitor.Log($"InventoryManagement: Placing {heldItem.Name} at slot {targetSlotId}", LogLevel.Debug);
 
                 // Handle non-inventory slots (equipment slots, trash, etc.)
-                // The game's receiveLeftClick uses mouse coordinates to determine what was
-                // clicked, but with controller snap navigation the mouse isn't at the snapped
-                // component. We call receiveLeftClick ourselves with the correct coordinates.
+                // The game's receiveLeftClick doesn't work on Android because it uses
+                // mouse coordinates internally. We handle equipment and trash directly.
                 if (!isInventorySlot)
                 {
                     var snapped = inventoryPage.currentlySnappedComponent;
-                    if (snapped != null)
+                    string slotName = snapped?.name ?? "";
+
+                    Monitor.Log($"InventoryManagement: Non-inventory slot {targetSlotId}, name='{slotName}', item={heldItem.Name}", LogLevel.Debug);
+
+                    // Try equipment slot
+                    if (TryEquipItem(slotName, heldItem))
                     {
-                        int clickX = snapped.bounds.X + snapped.bounds.Width / 2;
-                        int clickY = snapped.bounds.Y + snapped.bounds.Height / 2;
-
-                        if (ModEntry.Config.VerboseLogging)
-                            Monitor.Log($"InventoryManagement: Target slot {targetSlotId} is not inventory, calling receiveLeftClick at ({clickX},{clickY})", LogLevel.Debug);
-
-                        // Set flag so our prefix patches allow this receiveLeftClick through
-                        AllowGameAPress = true;
-                        inventoryPage.receiveLeftClick(clickX, clickY, true);
-
-                        // Sync holding state — the game may have consumed CursorSlotItem
-                        // (equipped item, trashed it, etc.)
                         if (Game1.player.CursorSlotItem == null)
                         {
                             IsHoldingItem = false;
                             SourceSlotId = -1;
-                            Monitor.Log($"InventoryManagement: Game consumed held item at slot {targetSlotId}", LogLevel.Info);
                         }
-                        else if (Game1.player.CursorSlotItem != heldItem)
-                        {
-                            // Game swapped the item (e.g. replacing equipped item)
-                            Monitor.Log($"InventoryManagement: Game swapped held item, now holding {Game1.player.CursorSlotItem.Name}", LogLevel.Info);
-                        }
+                        Game1.playSound("stoneStep");
+                        return true;
                     }
-                    return true;
+
+                    // Try trash can
+                    if (TryTrashItem(slotName, heldItem))
+                    {
+                        Game1.player.CursorSlotItem = null;
+                        IsHoldingItem = false;
+                        SourceSlotId = -1;
+                        return true;
+                    }
+
+                    // Unknown slot (sort button, tabs, etc.) — pass through to game
+                    Monitor.Log($"InventoryManagement: Slot '{slotName}' not handled, passing through", LogLevel.Debug);
+                    AllowGameAPress = true;
+                    return false;
                 }
 
                 Item targetItem = Game1.player.Items[targetSlotId];
@@ -742,6 +744,146 @@ namespace AndroidConsolizer.Patches
                 Monitor.Log($"InventoryManagement PlaceItem error: {ex.Message}", LogLevel.Error);
                 Monitor.Log(ex.StackTrace, LogLevel.Debug);
                 CancelHold();
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Try to equip the held item to the equipment slot identified by name.
+        /// Returns true if the item was equipped (or swapped with existing equipment).
+        /// </summary>
+        private static bool TryEquipItem(string slotName, Item heldItem)
+        {
+            try
+            {
+                switch (slotName)
+                {
+                    case "Hat":
+                        if (heldItem is Hat hat)
+                        {
+                            Hat oldHat = Game1.player.hat.Value;
+                            Game1.player.hat.Value = hat;
+                            Game1.player.CursorSlotItem = oldHat;
+                            Monitor.Log($"InventoryManagement: Equipped {hat.Name} to hat slot", LogLevel.Info);
+                            return true;
+                        }
+                        break;
+
+                    case "Shirt":
+                        if (heldItem is Clothing shirt && shirt.clothesType.Value == Clothing.ClothesType.SHIRT)
+                        {
+                            Clothing oldShirt = Game1.player.shirtItem.Value;
+                            Game1.player.shirtItem.Value = shirt;
+                            Game1.player.CursorSlotItem = oldShirt;
+                            Monitor.Log($"InventoryManagement: Equipped {shirt.Name} to shirt slot", LogLevel.Info);
+                            return true;
+                        }
+                        break;
+
+                    case "Pants":
+                        if (heldItem is Clothing pants && pants.clothesType.Value == Clothing.ClothesType.PANTS)
+                        {
+                            Clothing oldPants = Game1.player.pantsItem.Value;
+                            Game1.player.pantsItem.Value = pants;
+                            Game1.player.CursorSlotItem = oldPants;
+                            Monitor.Log($"InventoryManagement: Equipped {pants.Name} to pants slot", LogLevel.Info);
+                            return true;
+                        }
+                        break;
+
+                    case "Boots":
+                        if (heldItem is Boots boots)
+                        {
+                            Boots oldBoots = Game1.player.boots.Value;
+                            if (oldBoots != null) oldBoots.onUnequip(Game1.player);
+                            Game1.player.boots.Value = boots;
+                            boots.onEquip(Game1.player);
+                            Game1.player.CursorSlotItem = oldBoots;
+                            Monitor.Log($"InventoryManagement: Equipped {boots.Name} to boots slot", LogLevel.Info);
+                            return true;
+                        }
+                        break;
+
+                    case "Left Ring":
+                        if (heldItem is Ring leftRing)
+                        {
+                            Ring oldRing = Game1.player.leftRing.Value;
+                            if (oldRing != null) oldRing.onUnequip(Game1.player);
+                            Game1.player.leftRing.Value = leftRing;
+                            leftRing.onEquip(Game1.player);
+                            Game1.player.CursorSlotItem = oldRing;
+                            Monitor.Log($"InventoryManagement: Equipped {leftRing.Name} to left ring slot", LogLevel.Info);
+                            return true;
+                        }
+                        break;
+
+                    case "Right Ring":
+                        if (heldItem is Ring rightRing)
+                        {
+                            Ring oldRing = Game1.player.rightRing.Value;
+                            if (oldRing != null) oldRing.onUnequip(Game1.player);
+                            Game1.player.rightRing.Value = rightRing;
+                            rightRing.onEquip(Game1.player);
+                            Game1.player.CursorSlotItem = oldRing;
+                            Monitor.Log($"InventoryManagement: Equipped {rightRing.Name} to right ring slot", LogLevel.Info);
+                            return true;
+                        }
+                        break;
+                }
+
+                if (ModEntry.Config.VerboseLogging)
+                    Monitor.Log($"InventoryManagement: Item {heldItem.Name} doesn't match slot '{slotName}'", LogLevel.Debug);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Monitor.Log($"InventoryManagement TryEquipItem error: {ex.Message}", LogLevel.Error);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Try to trash the held item. Returns true if the item was trashed.
+        /// </summary>
+        private static bool TryTrashItem(string slotName, Item heldItem)
+        {
+            try
+            {
+                // The trash can component is typically named "" but we also check common names
+                // We identify it by checking if the InventoryPage's trashCan matches
+                if (Game1.activeClickableMenu is GameMenu gm && gm.currentTab == GameMenu.inventoryTab)
+                {
+                    var invPage = gm.pages[GameMenu.inventoryTab] as InventoryPage;
+                    if (invPage?.inventory != null)
+                    {
+                        // Check if the snapped component is the trash can
+                        var trashCan = AccessTools.Field(typeof(InventoryMenu), "trashCan")?.GetValue(invPage.inventory) as ClickableComponent;
+                        var snapped = invPage.currentlySnappedComponent;
+                        if (trashCan != null && snapped != null && snapped.myID == trashCan.myID)
+                        {
+                            // Give 15% sell value refund for Objects
+                            if (heldItem is StardewValley.Object obj)
+                            {
+                                int refund = (int)(obj.sellToStorePrice() * 0.15f) * heldItem.Stack;
+                                if (refund > 0)
+                                {
+                                    Game1.player.Money += refund;
+                                    Monitor.Log($"InventoryManagement: Trash refund: {refund}g", LogLevel.Debug);
+                                }
+                            }
+
+                            Game1.playSound("trashcan");
+                            Monitor.Log($"InventoryManagement: Trashed {heldItem.Name} (x{heldItem.Stack})", LogLevel.Info);
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Monitor.Log($"InventoryManagement TryTrashItem error: {ex.Message}", LogLevel.Error);
                 return false;
             }
         }
