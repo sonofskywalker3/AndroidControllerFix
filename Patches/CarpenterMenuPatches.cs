@@ -91,9 +91,6 @@ namespace AndroidConsolizer.Patches
         /// select + confirm as a pair.</summary>
         private static Building _demolishSelectedBuilding = null;
 
-        /// <summary>When true, the next receiveGamePadButton(A) call is the auto-confirm
-        /// half of a select+confirm pair. Bypasses all prefix checks.</summary>
-        private static bool _demolishAutoConfirm = false;
 
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
@@ -243,7 +240,6 @@ namespace AndroidConsolizer.Patches
             _ghostPlaced = false;
             _buildPressHandled = false;
             _demolishSelectedBuilding = null;
-            _demolishAutoConfirm = false;
             if (ModEntry.Config.VerboseLogging)
                 Monitor.Log($"CarpenterMenu opened at tick {MenuOpenTick}. Grace period: {GracePeriodTicks} ticks.", LogLevel.Debug);
         }
@@ -264,7 +260,6 @@ namespace AndroidConsolizer.Patches
             _ghostPlaced = false;
             _buildPressHandled = false;
             _demolishSelectedBuilding = null;
-            _demolishAutoConfirm = false;
         }
 
         /// <summary>Check if we're within the grace period after menu open.</summary>
@@ -347,59 +342,44 @@ namespace AndroidConsolizer.Patches
                         }
                     }
 
-                    // Demolish mode: we track selection ourselves and only let A
-                    // through when the user confirms. Then we send select + confirm
-                    // as a pair so the game never has a "pending selection" that could
-                    // be accidentally confirmed at the wrong position.
+                    // Demolish mode: first A selects (game highlights building),
+                    // second A on same building confirms. If cursor moved off the
+                    // building, send B to cancel the selection instead of A.
                     bool isDemolishingVal = DemolishingField != null && (bool)DemolishingField.GetValue(__instance);
                     if (isDemolishingVal)
                     {
-                        // Auto-confirm: second half of select+confirm pair from postfix
-                        if (_demolishAutoConfirm)
-                        {
-                            _demolishAutoConfirm = false;
-                            if (ModEntry.Config.VerboseLogging)
-                                Monitor.Log("[CarpenterMenu] Demolish: auto-confirm → letting A through", LogLevel.Debug);
-                            return true;
-                        }
-
-                        Building cursorBuilding = GetBuildingAtCursor();
-
                         if (_demolishSelectedBuilding == null)
                         {
-                            // No building tracked yet. If cursor is on a building, start tracking.
-                            if (cursorBuilding != null)
-                            {
-                                _demolishSelectedBuilding = cursorBuilding;
-                                _ghostPlaced = true;
-                                if (ModEntry.Config.VerboseLogging)
-                                    Monitor.Log($"[CarpenterMenu] Demolish: selected {cursorBuilding.buildingType.Value} — press A again to confirm", LogLevel.Debug);
-                            }
-                            else if (ModEntry.Config.VerboseLogging)
-                                Monitor.Log("[CarpenterMenu] Demolish: A on empty space — ignored", LogLevel.Trace);
-                            return false; // Always block — game doesn't see selection yet
-                        }
-
-                        // Building is tracked. Check if user is confirming or switching.
-                        if (_ghostPlaced || cursorBuilding == _demolishSelectedBuilding)
-                        {
-                            // Cursor unmoved or still on same building → CONFIRM.
-                            // Let A through (game selects), postfix sends second A (game confirms).
-                            _demolishAutoConfirm = true;
+                            // No building selected → let A through for selection.
+                            // Double-fire guard: if we already let one through this
+                            // frame (postfix hasn't consumed it yet), block duplicate.
+                            if (_buildPressHandled)
+                                return false;
                             _buildPressHandled = true;
-                            _demolishSelectedBuilding = null;
-                            _ghostPlaced = false;
                             if (ModEntry.Config.VerboseLogging)
-                                Monitor.Log("[CarpenterMenu] Demolish: CONFIRM → sending select+confirm pair", LogLevel.Debug);
+                                Monitor.Log("[CarpenterMenu] Demolish: no selection → letting A through", LogLevel.Debug);
                             return true;
                         }
 
-                        // Cursor on different building or empty → update tracking
-                        _demolishSelectedBuilding = cursorBuilding; // null if empty
-                        _ghostPlaced = cursorBuilding != null;
+                        // Building selected. Check cursor position.
+                        if (_ghostPlaced || GetBuildingAtCursor() == _demolishSelectedBuilding)
+                        {
+                            // Same building or cursor unmoved → confirm demolish
+                            _demolishSelectedBuilding = null;
+                            _ghostPlaced = false;
+                            _buildPressHandled = true;
+                            if (ModEntry.Config.VerboseLogging)
+                                Monitor.Log("[CarpenterMenu] Demolish: same building → CONFIRM", LogLevel.Debug);
+                            return true;
+                        }
+
+                        // Different building or empty → cancel selection via B, block A
                         if (ModEntry.Config.VerboseLogging)
-                            Monitor.Log($"[CarpenterMenu] Demolish: switched target to {cursorBuilding?.buildingType.Value ?? "none"}", LogLevel.Debug);
-                        return false; // Block — game still doesn't see anything
+                            Monitor.Log("[CarpenterMenu] Demolish: off building → sending B to cancel", LogLevel.Debug);
+                        _demolishSelectedBuilding = null;
+                        _ghostPlaced = false;
+                        __instance.receiveGamePadButton(Buttons.B);
+                        return false;
                     }
 
                     // Move (building selected): two-press guard
@@ -529,7 +509,6 @@ namespace AndroidConsolizer.Patches
                 _cursorCentered = false;
                 _overridingMousePosition = false;
                 _demolishSelectedBuilding = null;
-                _demolishAutoConfirm = false;
                 return;
             }
 
@@ -692,13 +671,13 @@ namespace AndroidConsolizer.Patches
                         Monitor.Log($"[CarpenterMenu] {mode} action handled by receiveGamePadButton at ({(int)_cursorX},{(int)_cursorY}) buildingToMove={btm?.buildingType.Value ?? "none"}", LogLevel.Debug);
                     }
 
-                    // Demolish auto-confirm: prefix sent the first A (game selected the
-                    // building). Now send the second A immediately to confirm demolition.
-                    if (isDemolishing && _demolishAutoConfirm)
+                    // In demolish mode, detect which building was just selected
+                    // so the prefix can check cursor position on the next A press.
+                    if (isDemolishing && _demolishSelectedBuilding == null)
                     {
+                        _demolishSelectedBuilding = GetBuildingAtCursor();
                         if (ModEntry.Config.VerboseLogging)
-                            Monitor.Log("[CarpenterMenu] Demolish: sending auto-confirm A", LogLevel.Debug);
-                        __instance.receiveGamePadButton(Buttons.A);
+                            Monitor.Log($"[CarpenterMenu] Demolish: selected building = {_demolishSelectedBuilding?.buildingType.Value ?? "none"}", LogLevel.Debug);
                     }
                 }
                 else
