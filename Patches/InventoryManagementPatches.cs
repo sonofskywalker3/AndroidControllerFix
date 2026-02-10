@@ -644,14 +644,39 @@ namespace AndroidConsolizer.Patches
                     Monitor.Log($"InventoryManagement: Placing {heldItem.Name} at slot {targetSlotId}", LogLevel.Debug);
 
                 // Handle non-inventory slots (equipment slots, trash, etc.)
-                // Let the game's own handler process these — it knows how to equip items,
-                // trash held items, etc. when CursorSlotItem is set.
+                // The game's receiveLeftClick uses mouse coordinates to determine what was
+                // clicked, but with controller snap navigation the mouse isn't at the snapped
+                // component. We call receiveLeftClick ourselves with the correct coordinates.
                 if (!isInventorySlot)
                 {
-                    if (ModEntry.Config.VerboseLogging)
-                        Monitor.Log($"InventoryManagement: Target slot {targetSlotId} is not inventory, passing through to game", LogLevel.Debug);
-                    AllowGameAPress = true;
-                    return false;
+                    var snapped = inventoryPage.currentlySnappedComponent;
+                    if (snapped != null)
+                    {
+                        int clickX = snapped.bounds.X + snapped.bounds.Width / 2;
+                        int clickY = snapped.bounds.Y + snapped.bounds.Height / 2;
+
+                        if (ModEntry.Config.VerboseLogging)
+                            Monitor.Log($"InventoryManagement: Target slot {targetSlotId} is not inventory, calling receiveLeftClick at ({clickX},{clickY})", LogLevel.Debug);
+
+                        // Set flag so our prefix patches allow this receiveLeftClick through
+                        AllowGameAPress = true;
+                        inventoryPage.receiveLeftClick(clickX, clickY, true);
+
+                        // Sync holding state — the game may have consumed CursorSlotItem
+                        // (equipped item, trashed it, etc.)
+                        if (Game1.player.CursorSlotItem == null)
+                        {
+                            IsHoldingItem = false;
+                            SourceSlotId = -1;
+                            Monitor.Log($"InventoryManagement: Game consumed held item at slot {targetSlotId}", LogLevel.Info);
+                        }
+                        else if (Game1.player.CursorSlotItem != heldItem)
+                        {
+                            // Game swapped the item (e.g. replacing equipped item)
+                            Monitor.Log($"InventoryManagement: Game swapped held item, now holding {Game1.player.CursorSlotItem.Name}", LogLevel.Info);
+                        }
+                    }
+                    return true;
                 }
 
                 Item targetItem = Game1.player.Items[targetSlotId];
