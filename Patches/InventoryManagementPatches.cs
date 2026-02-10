@@ -472,10 +472,7 @@ namespace AndroidConsolizer.Patches
                     // Not holding - try to pick up item
                     if (!isInventorySlot)
                     {
-                        if (ModEntry.Config.VerboseLogging)
-                            Monitor.Log($"InventoryManagement: Slot {slotId} is not inventory slot, passing through to game", LogLevel.Debug);
-                        AllowGameAPress = true;
-                        return false;
+                        return PickUpFromEquipmentSlot(inventoryPage, slotId);
                     }
 
                     Item item = Game1.player.Items[slotId];
@@ -623,6 +620,90 @@ namespace AndroidConsolizer.Patches
                 CancelHold();
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Pick up an item from an equipment slot to cursor (console-style).
+        /// </summary>
+        private static bool PickUpFromEquipmentSlot(InventoryPage inventoryPage, int slotId)
+        {
+            Item pickedUp = null;
+
+            switch (slotId)
+            {
+                case 101: // Hat
+                    if (Game1.player.hat.Value != null)
+                    {
+                        pickedUp = Game1.player.hat.Value;
+                        Game1.player.hat.Value = null;
+                    }
+                    break;
+                case 102: // Right Ring
+                {
+                    Ring ring = Game1.player.rightRing.Value;
+                    if (ring != null)
+                    {
+                        ring.onUnequip(Game1.player);
+                        Game1.player.rightRing.Value = null;
+                        pickedUp = ring;
+                    }
+                    break;
+                }
+                case 103: // Left Ring
+                {
+                    Ring ring = Game1.player.leftRing.Value;
+                    if (ring != null)
+                    {
+                        ring.onUnequip(Game1.player);
+                        Game1.player.leftRing.Value = null;
+                        pickedUp = ring;
+                    }
+                    break;
+                }
+                case 104: // Boots
+                {
+                    Boots boots = Game1.player.boots.Value;
+                    if (boots != null)
+                    {
+                        boots.onUnequip(Game1.player);
+                        Game1.player.boots.Value = null;
+                        pickedUp = boots;
+                    }
+                    break;
+                }
+                case 108: // Shirt
+                    if (Game1.player.shirtItem.Value != null)
+                    {
+                        pickedUp = Game1.player.shirtItem.Value;
+                        Game1.player.shirtItem.Value = null;
+                    }
+                    break;
+                case 109: // Pants
+                    if (Game1.player.pantsItem.Value != null)
+                    {
+                        pickedUp = Game1.player.pantsItem.Value;
+                        Game1.player.pantsItem.Value = null;
+                    }
+                    break;
+                default:
+                    // Non-equipment slot (organize 106, trash 105, etc.) — let game handle
+                    if (ModEntry.Config.VerboseLogging)
+                        Monitor.Log($"InventoryManagement: Slot {slotId} is not equipment, passing through", LogLevel.Debug);
+                    AllowGameAPress = true;
+                    return false;
+            }
+
+            if (pickedUp == null)
+                return true; // Empty equipment slot — consume input, do nothing
+
+            Game1.player.CursorSlotItem = pickedUp;
+            IsHoldingItem = true;
+            SourceSlotId = -1; // No inventory source slot
+
+            ClearInventorySelection(inventoryPage);
+            Game1.playSound("dwop");
+            Monitor.Log($"InventoryManagement: Picked up {pickedUp.Name} from equipment slot {slotId}", LogLevel.Info);
+            return true;
         }
 
         /// <summary>
