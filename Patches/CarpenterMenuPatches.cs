@@ -134,6 +134,13 @@ namespace AndroidConsolizer.Patches
                     prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(ReceiveGamePadButton_Prefix))
                 );
 
+                // Diagnostic: log ALL receiveLeftClick calls to track touch simulation
+                harmony.Patch(
+                    original: AccessTools.Method(typeof(CarpenterMenu), nameof(CarpenterMenu.receiveLeftClick),
+                                                 new[] { typeof(int), typeof(int), typeof(bool) }),
+                    prefix: new HarmonyMethod(typeof(CarpenterMenuPatches), nameof(ReceiveLeftClick_Log_Prefix))
+                );
+
                 // Cache reflection fields for farm-view cursor movement
                 OnFarmField = AccessTools.Field(typeof(CarpenterMenu), "onFarm");
                 FreezeField = AccessTools.Field(typeof(CarpenterMenu), "freeze");
@@ -310,6 +317,46 @@ namespace AndroidConsolizer.Patches
         }
 
         /// <summary>
+        /// Diagnostic prefix for CarpenterMenu.receiveLeftClick — logs ALL calls on farm view.
+        /// This catches touch simulation, our explicit calls, and any other source.
+        /// </summary>
+        private static void ReceiveLeftClick_Log_Prefix(CarpenterMenu __instance, int x, int y)
+        {
+            if (!ModEntry.Config.VerboseLogging) return;
+            if (OnFarmField == null || !(bool)OnFarmField.GetValue(__instance)) return;
+
+            // Detect caller: check if this is from our code or from elsewhere
+            var stackTrace = new System.Diagnostics.StackTrace(2, false); // skip 2 frames (this method + harmony)
+            string caller = "unknown";
+            for (int i = 0; i < Math.Min(stackTrace.FrameCount, 5); i++)
+            {
+                var method = stackTrace.GetFrame(i)?.GetMethod();
+                if (method != null)
+                {
+                    string fullName = method.DeclaringType?.Name + "." + method.Name;
+                    if (fullName.Contains("CarpenterMenuPatches"))
+                    {
+                        caller = "OUR CODE (" + method.Name + ")";
+                        break;
+                    }
+                    if (fullName.Contains("Game1") || fullName.Contains("update") || fullName.Contains("Update"))
+                    {
+                        caller = fullName;
+                        break;
+                    }
+                }
+            }
+
+            bool isDemolishing = DemolishingField != null && (bool)DemolishingField.GetValue(__instance);
+            bool isMoving = MovingField != null && (bool)MovingField.GetValue(__instance);
+            string mode = isDemolishing ? "DEMOLISH" : isMoving ? "MOVE" : "BUILD";
+            var btm = BuildingToMoveField?.GetValue(__instance) as Building;
+            var buildingAtClick = GetBuildingAtCursor();
+
+            Monitor.Log($"[CarpenterMenu] receiveLeftClick({x},{y}) mode={mode} caller={caller} buildingToMove={btm?.buildingType.Value ?? "none"} buildingAtCursor={buildingAtClick?.buildingType.Value ?? "none"} ourSelection={_demolishSelectedBuilding?.buildingType.Value ?? "none"}", LogLevel.Debug);
+        }
+
+        /// <summary>
         /// Prefix for CarpenterMenu.receiveGamePadButton — two-press A button system.
         /// First A press: block here so Update_Postfix can position the ghost via receiveLeftClick.
         /// Second A press (ghost already placed): let through so the game builds at the ghost position.
@@ -377,10 +424,19 @@ namespace AndroidConsolizer.Patches
                         // cursor position. GetMouseState override is active and returns our
                         // off-building cursor coords, so the game deselects the highlight.
                         if (ModEntry.Config.VerboseLogging)
-                            Monitor.Log("[CarpenterMenu] Demolish: off building → receiveLeftClick to deselect", LogLevel.Debug);
+                            Monitor.Log($"[CarpenterMenu] Demolish: off building → receiveLeftClick({(int)_cursorX},{(int)_cursorY}) to deselect", LogLevel.Debug);
                         _demolishSelectedBuilding = null;
                         _ghostPlaced = false;
                         __instance.receiveLeftClick((int)_cursorX, (int)_cursorY);
+                        // Log game state AFTER our deselect
+                        if (ModEntry.Config.VerboseLogging)
+                        {
+                            var btmAfter = BuildingToMoveField?.GetValue(__instance) as Building;
+                            bool stillDemolishing = DemolishingField != null && (bool)DemolishingField.GetValue(__instance);
+                            bool frozen = FreezeField != null && (bool)FreezeField.GetValue(__instance);
+                            bool onFarm = OnFarmField != null && (bool)OnFarmField.GetValue(__instance);
+                            Monitor.Log($"[CarpenterMenu] After deselect: demolishing={stillDemolishing} freeze={frozen} onFarm={onFarm} buildingToMove={btmAfter?.buildingType.Value ?? "none"}", LogLevel.Debug);
+                        }
                         return false;
                     }
 
