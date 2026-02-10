@@ -250,6 +250,25 @@ namespace AndroidConsolizer.Patches
                     // Let the game handle non-inventory slots (equipment, sort, trash)
                     if (InventoryManagementPatches.AllowGameAPress)
                         return true;
+
+                    // v3.2.5: Allow leftClickHeld through when holding an item on an
+                    // equipment/trash slot. The game's touch-drag equip path needs
+                    // leftClickHeld to fire (it may set internal state for releaseLeftClick
+                    // or contain the equip logic itself).
+                    if (InventoryManagementPatches.IsCurrentlyHolding())
+                    {
+                        var snapped = __instance.currentlySnappedComponent;
+                        if (snapped != null)
+                        {
+                            bool isInventorySlot = snapped.myID >= 0 && snapped.myID < Game1.player.Items.Count;
+                            if (!isInventorySlot)
+                            {
+                                Monitor.Log($"[DIAG] leftClickHeld ALLOWED for equip: ({x},{y}) slot={snapped.myID} cursor={Game1.player.CursorSlotItem?.Name}", LogLevel.Info);
+                                return true;
+                            }
+                        }
+                    }
+
                     if (ModEntry.Config.VerboseLogging)
                         Monitor.Log($"Blocking leftClickHeld while A is pressed (console inventory mode)", LogLevel.Debug);
                     return false;
