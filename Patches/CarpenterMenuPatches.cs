@@ -682,15 +682,18 @@ namespace AndroidConsolizer.Patches
                             Monitor.Log($"[CarpenterMenu] Demolish: selected building = {_demolishSelectedBuilding?.buildingType.Value ?? "none"}", LogLevel.Debug);
                     }
                 }
-                else
+                else if (!isDemolishing)
                 {
                     // Prefix blocked receiveGamePadButton(A) — position ghost at cursor.
                     // Override is already active (continuous on farm view).
+                    // Skip for demolish mode: prefix handles ALL demolish A presses itself
+                    // (either lets through for selection/confirm, or calls receiveLeftClick
+                    // for deselect). Running receiveLeftClick again here would double-fire.
                     __instance.receiveLeftClick((int)_cursorX, (int)_cursorY);
                     _ghostPlaced = true;
                     if (ModEntry.Config.VerboseLogging)
                     {
-                        string mode = isMoving ? "MOVE" : isDemolishing ? "DEMOLISH" : "BUILD";
+                        string mode = isMoving ? "MOVE" : "BUILD";
                         Monitor.Log($"[CarpenterMenu] {mode} ghost positioned at ({(int)_cursorX},{(int)_cursorY}) — press A again to confirm. zoom={Game1.options.zoomLevel} buildW={_buildingTileWidth} buildH={_buildingTileHeight}", LogLevel.Debug);
                     }
                 }

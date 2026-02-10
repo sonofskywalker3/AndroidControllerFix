@@ -45,6 +45,12 @@ These need to be re-implemented **one at a time, one per 0.0.1 patch, each commi
 - **File:** `Patches/CarpenterMenuPatches.cs`
 - **Config:** `EnableCarpenterMenuFix` in ModConfig.cs
 
+### 1a-ii. CarpenterMenu "Build" Button Unaffordable — TO INVESTIGATE
+- **Symptom:** Clicking "Build" for a building you can't afford dumps you back to the shop screen. On console, the "Build" button is greyed out when you can't afford it.
+- **Need to check:** What is the vanilla Android behavior? Is this a vanilla Android bug or something we introduced?
+- **Desired behavior:** Either grey out the Build button (console parity) or at minimum don't exit to shop — show an error message or play a failure sound.
+- **File:** `Patches/CarpenterMenuPatches.cs`
+
 ### 1b. CarpenterMenu Joystick Panning + Cursor — DONE (v3.1.14-v3.1.21)
 - **Panning:** Harmony postfix on `CarpenterMenu.update(GameTime)` reads left stick, calls `Game1.panScreen()` when cursor reaches viewport edge. Pan compensation (`_cursorX -= panX`) keeps cursor at same world position.
 - **Visible cursor:** Harmony postfix on `CarpenterMenu.draw(SpriteBatch)` renders the standard game cursor at the tracked joystick position.
