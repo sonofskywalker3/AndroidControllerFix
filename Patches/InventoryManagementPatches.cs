@@ -7,6 +7,7 @@ using Microsoft.Xna.Framework.Input;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
+using StardewValley.Objects;
 using StardewValley.Tools;
 
 namespace AndroidConsolizer.Patches
@@ -643,19 +644,18 @@ namespace AndroidConsolizer.Patches
                 if (ModEntry.Config.VerboseLogging)
                     Monitor.Log($"InventoryManagement: Placing {heldItem.Name} at slot {targetSlotId}", LogLevel.Debug);
 
-                // Handle non-inventory slots (equipment slots, trash, etc.)
-                // Don't suppress — let the game's own receiveGamePadButton(A) handle it.
-                // The game's code checks CursorSlotItem and the snapped component, then
-                // equips to the matching slot or trashes with proper sounds, animations,
-                // and upgrade-tier refund calculations. AllowGameAPress tells our prefix
-                // patches to let the A press through to the game's handler.
-                // State sync (CursorSlotItem consumed/swapped) is handled by OnUpdateTicked.
+                // Handle non-inventory slots (equipment slots, trash, etc.) directly.
+                // Android's InventoryPage doesn't support equipping from CursorSlotItem —
+                // it only handles equipping via its internal touch-drag state machine.
+                // Diagnostic builds v3.2.3-v3.2.5 confirmed: receiveLeftClick, leftClickHeld,
+                // and releaseLeftClick all fire at correct coordinates with CursorSlotItem set,
+                // but NONE consume it. Touch-drag equip shows cursor=(none) — different mechanism.
+                // So we handle equipment/trash ourselves, same as we handle inventory swaps.
                 if (!isInventorySlot)
                 {
                     if (ModEntry.Config.VerboseLogging)
-                        Monitor.Log($"InventoryManagement: Slot {targetSlotId} is non-inventory, deferring to game's A-button handler", LogLevel.Debug);
-                    AllowGameAPress = true;
-                    return false;
+                        Monitor.Log($"InventoryManagement: Placing {heldItem.Name} at non-inventory slot {targetSlotId}", LogLevel.Debug);
+                    return PlaceItemInNonInventorySlot(targetSlotId, heldItem);
                 }
 
                 Item targetItem = Game1.player.Items[targetSlotId];
@@ -723,6 +723,174 @@ namespace AndroidConsolizer.Patches
                 CancelHold();
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Handle placing a held item into a non-inventory slot (equipment or trash).
+        /// Android's InventoryPage doesn't support equipping from CursorSlotItem —
+        /// it only supports touch-drag. So we handle equipment/trash directly.
+        /// </summary>
+        private static bool PlaceItemInNonInventorySlot(int slotId, Item heldItem)
+        {
+            switch (slotId)
+            {
+                case 101: return TryEquipHat(heldItem);
+                case 102: return TryEquipRing(heldItem, isLeft: false);
+                case 103: return TryEquipRing(heldItem, isLeft: true);
+                case 104: return TryEquipBoots(heldItem);
+                case 105: return TrashHeldItem(heldItem);
+                case 108: return TryEquipClothing(heldItem, isShirt: true);
+                case 109: return TryEquipClothing(heldItem, isShirt: false);
+                default:
+                    // Unknown non-inventory slot (organize button 106, etc.) — let game handle
+                    if (ModEntry.Config.VerboseLogging)
+                        Monitor.Log($"InventoryManagement: Slot {slotId} is unknown non-inventory, passing through", LogLevel.Debug);
+                    AllowGameAPress = true;
+                    return false;
+            }
+        }
+
+        private static bool TryEquipHat(Item heldItem)
+        {
+            if (heldItem is not Hat newHat)
+            {
+                Game1.playSound("cancel");
+                return true;
+            }
+
+            Hat oldHat = Game1.player.hat.Value;
+            Game1.player.hat.Value = newHat;
+            Game1.player.CursorSlotItem = oldHat;
+
+            if (oldHat == null)
+            {
+                IsHoldingItem = false;
+                SourceSlotId = -1;
+            }
+
+            Game1.playSound("grassyStep");
+            Monitor.Log($"InventoryManagement: Equipped hat {newHat.Name}" + (oldHat != null ? $", holding {oldHat.Name}" : ""), LogLevel.Info);
+            return true;
+        }
+
+        private static bool TryEquipRing(Item heldItem, bool isLeft)
+        {
+            if (heldItem is not Ring newRing)
+            {
+                Game1.playSound("cancel");
+                return true;
+            }
+
+            var ringField = isLeft ? Game1.player.leftRing : Game1.player.rightRing;
+            Ring oldRing = ringField.Value;
+
+            if (oldRing != null)
+                oldRing.onUnequip(Game1.player);
+
+            ringField.Value = newRing;
+            newRing.onEquip(Game1.player);
+            Game1.player.CursorSlotItem = oldRing;
+
+            if (oldRing == null)
+            {
+                IsHoldingItem = false;
+                SourceSlotId = -1;
+            }
+
+            Game1.playSound("crit");
+            string slotName = isLeft ? "left" : "right";
+            Monitor.Log($"InventoryManagement: Equipped {slotName} ring {newRing.Name}" + (oldRing != null ? $", holding {oldRing.Name}" : ""), LogLevel.Info);
+            return true;
+        }
+
+        private static bool TryEquipBoots(Item heldItem)
+        {
+            if (heldItem is not Boots newBoots)
+            {
+                Game1.playSound("cancel");
+                return true;
+            }
+
+            Boots oldBoots = Game1.player.boots.Value;
+
+            if (oldBoots != null)
+                oldBoots.onUnequip(Game1.player);
+
+            Game1.player.boots.Value = newBoots;
+            newBoots.onEquip(Game1.player);
+            Game1.player.CursorSlotItem = oldBoots;
+
+            if (oldBoots == null)
+            {
+                IsHoldingItem = false;
+                SourceSlotId = -1;
+            }
+
+            Game1.playSound("sandyStep");
+            Monitor.Log($"InventoryManagement: Equipped boots {newBoots.Name}" + (oldBoots != null ? $", holding {oldBoots.Name}" : ""), LogLevel.Info);
+            return true;
+        }
+
+        private static bool TryEquipClothing(Item heldItem, bool isShirt)
+        {
+            if (heldItem is not Clothing newClothing)
+            {
+                Game1.playSound("cancel");
+                return true;
+            }
+
+            // Check clothing type matches the slot (0 = Shirt, 1 = Pants)
+            bool clothingIsShirt = (int)newClothing.clothesType.Value == 0;
+            if (clothingIsShirt != isShirt)
+            {
+                Game1.playSound("cancel");
+                if (ModEntry.Config.VerboseLogging)
+                    Monitor.Log($"InventoryManagement: {heldItem.Name} is {(clothingIsShirt ? "shirt" : "pants")}, wrong slot", LogLevel.Debug);
+                return true;
+            }
+
+            var clothingField = isShirt ? Game1.player.shirtItem : Game1.player.pantsItem;
+            Clothing oldClothing = clothingField.Value;
+
+            clothingField.Value = newClothing;
+            Game1.player.CursorSlotItem = oldClothing;
+
+            if (oldClothing == null)
+            {
+                IsHoldingItem = false;
+                SourceSlotId = -1;
+            }
+
+            Game1.playSound("sandyStep");
+            string slotName = isShirt ? "shirt" : "pants";
+            Monitor.Log($"InventoryManagement: Equipped {slotName} {newClothing.Name}" + (oldClothing != null ? $", holding {oldClothing.Name}" : ""), LogLevel.Info);
+            return true;
+        }
+
+        private static bool TrashHeldItem(Item heldItem)
+        {
+            // Calculate refund based on trash can upgrade level
+            try
+            {
+                int refund = Utility.getTrashReclamationPrice(heldItem, Game1.player);
+                if (refund > 0)
+                {
+                    Game1.player.Money += refund;
+                    Monitor.Log($"InventoryManagement: Trash refund: {refund}g", LogLevel.Info);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (ModEntry.Config.VerboseLogging)
+                    Monitor.Log($"InventoryManagement: Trash refund calculation failed: {ex.Message}", LogLevel.Debug);
+            }
+
+            Monitor.Log($"InventoryManagement: Trashed {heldItem.Name}", LogLevel.Info);
+            Game1.playSound("trashcan");
+            Game1.player.CursorSlotItem = null;
+            IsHoldingItem = false;
+            SourceSlotId = -1;
+            return true;
         }
 
         /// <summary>
