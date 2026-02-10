@@ -373,12 +373,14 @@ namespace AndroidConsolizer.Patches
                             return true;
                         }
 
-                        // Different building or empty → cancel selection via B, block A
+                        // Different building or empty → deselect via receiveLeftClick at
+                        // cursor position. GetMouseState override is active and returns our
+                        // off-building cursor coords, so the game deselects the highlight.
                         if (ModEntry.Config.VerboseLogging)
-                            Monitor.Log("[CarpenterMenu] Demolish: off building → sending B to cancel", LogLevel.Debug);
+                            Monitor.Log("[CarpenterMenu] Demolish: off building → receiveLeftClick to deselect", LogLevel.Debug);
                         _demolishSelectedBuilding = null;
                         _ghostPlaced = false;
-                        __instance.receiveGamePadButton(Buttons.B);
+                        __instance.receiveLeftClick((int)_cursorX, (int)_cursorY);
                         return false;
                     }
 
