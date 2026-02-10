@@ -90,6 +90,10 @@ namespace AndroidConsolizer.Patches
         /// Prevents duplicate receiveGamePadButton calls within the same tick.</summary>
         private static int _demolishLastATick = -1;
 
+        /// <summary>The building currently selected for demolition. Null means no selection.
+        /// Used to detect whether the cursor is still on the same building on the next A press.</summary>
+        private static Building _demolishSelectedBuilding = null;
+
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
         {
@@ -238,6 +242,7 @@ namespace AndroidConsolizer.Patches
             _ghostPlaced = false;
             _buildPressHandled = false;
             _demolishLastATick = -1;
+            _demolishSelectedBuilding = null;
             if (ModEntry.Config.VerboseLogging)
                 Monitor.Log($"CarpenterMenu opened at tick {MenuOpenTick}. Grace period: {GracePeriodTicks} ticks.", LogLevel.Debug);
         }
@@ -258,6 +263,7 @@ namespace AndroidConsolizer.Patches
             _ghostPlaced = false;
             _buildPressHandled = false;
             _demolishLastATick = -1;
+            _demolishSelectedBuilding = null;
         }
 
         /// <summary>Check if we're within the grace period after menu open.</summary>
@@ -282,6 +288,29 @@ namespace AndroidConsolizer.Patches
             if (DemolishingField != null && (bool)DemolishingField.GetValue(instance))
                 return true;
             return false;
+        }
+
+        /// <summary>Find the building at the current cursor position, or null if empty space.</summary>
+        private static Building GetBuildingAtCursor()
+        {
+            var farm = Game1.getFarm();
+            if (farm == null) return null;
+
+            // Convert cursor (viewport coords) to world tile coords
+            int worldX = Game1.viewport.X + (int)_cursorX;
+            int worldY = Game1.viewport.Y + (int)_cursorY;
+            int tileX = worldX / 64;
+            int tileY = worldY / 64;
+
+            foreach (var building in farm.buildings)
+            {
+                if (tileX >= building.tileX.Value && tileX < building.tileX.Value + building.tilesWide.Value &&
+                    tileY >= building.tileY.Value && tileY < building.tileY.Value + building.tilesHigh.Value)
+                {
+                    return building;
+                }
+            }
+            return null;
         }
 
         /// <summary>
@@ -317,45 +346,60 @@ namespace AndroidConsolizer.Patches
                         }
                     }
 
-                    // Demolish mode: behavior depends on whether the game is frozen
-                    // (showing confirmation dialog) or not (selecting buildings).
+                    // Demolish mode: building-aware selection system.
                     // receiveLeftClick can't select or demolish buildings — only
-                    // receiveGamePadButton can.
+                    // receiveGamePadButton can. We track which building was selected
+                    // and check cursor position on subsequent A presses.
                     bool isDemolishingVal = DemolishingField != null && (bool)DemolishingField.GetValue(__instance);
                     if (isDemolishingVal)
                     {
-                        bool isFrozen = FreezeField != null && (bool)FreezeField.GetValue(__instance);
-                        if (!isFrozen)
+                        // Per-tick guard prevents same-tick double-fire
+                        if (_demolishLastATick == Game1.ticks)
+                            return false;
+
+                        if (_demolishSelectedBuilding == null)
                         {
-                            // Not frozen → selection phase. Let every A through
-                            // (per-tick guard prevents same-tick double-fire).
-                            if (_demolishLastATick == Game1.ticks)
-                                return false;
+                            // No building selected → selection attempt
                             _demolishLastATick = Game1.ticks;
                             _buildPressHandled = true;
                             if (ModEntry.Config.VerboseLogging)
-                                Monitor.Log("[CarpenterMenu] Demolish: selection attempt (freeze=false)", LogLevel.Debug);
+                                Monitor.Log("[CarpenterMenu] Demolish: no selection → letting A through", LogLevel.Debug);
                             return true;
                         }
-                        else
+
+                        // Building is selected. Check cursor position.
+                        if (_ghostPlaced)
                         {
-                            // Frozen → confirmation dialog showing. Two-press guard
-                            // prevents accidental confirm when cursor moved off building.
-                            if (_ghostPlaced)
-                            {
-                                _ghostPlaced = false;
-                                _buildPressHandled = true;
-                                if (ModEntry.Config.VerboseLogging)
-                                    Monitor.Log("[CarpenterMenu] Demolish: letting A through to CONFIRM (freeze=true)", LogLevel.Debug);
-                                return true;
-                            }
-                            else
-                            {
-                                if (ModEntry.Config.VerboseLogging)
-                                    Monitor.Log("[CarpenterMenu] Demolish: BLOCKED A → positioning first (freeze=true)", LogLevel.Trace);
-                                return false;
-                            }
+                            // Cursor hasn't moved since selection → confirm
+                            _demolishLastATick = Game1.ticks;
+                            _ghostPlaced = false;
+                            _demolishSelectedBuilding = null;
+                            _buildPressHandled = true;
+                            if (ModEntry.Config.VerboseLogging)
+                                Monitor.Log("[CarpenterMenu] Demolish: cursor unmoved → CONFIRM", LogLevel.Debug);
+                            return true;
                         }
+
+                        // Cursor moved. Check if still on the same building.
+                        Building cursorBuilding = GetBuildingAtCursor();
+                        if (cursorBuilding == _demolishSelectedBuilding)
+                        {
+                            // Same building → confirm
+                            _demolishLastATick = Game1.ticks;
+                            _demolishSelectedBuilding = null;
+                            _buildPressHandled = true;
+                            if (ModEntry.Config.VerboseLogging)
+                                Monitor.Log("[CarpenterMenu] Demolish: still on same building → CONFIRM", LogLevel.Debug);
+                            return true;
+                        }
+
+                        // Different building or empty space → deselect, new selection attempt
+                        if (ModEntry.Config.VerboseLogging)
+                            Monitor.Log($"[CarpenterMenu] Demolish: cursor off building → deselect, new selection (now={cursorBuilding?.buildingType.Value ?? "none"})", LogLevel.Debug);
+                        _demolishSelectedBuilding = null;
+                        _demolishLastATick = Game1.ticks;
+                        _buildPressHandled = true;
+                        return true;
                     }
 
                     // Move (building selected): two-press guard
@@ -484,21 +528,13 @@ namespace AndroidConsolizer.Patches
             {
                 _cursorCentered = false;
                 _overridingMousePosition = false;
+                _demolishSelectedBuilding = null;
                 return;
             }
 
-            // Don't move during animations/transitions (e.g., demolish confirmation).
-            // Still process _buildPressHandled so the two-press guard advances
-            // (prefix let A through → postfix sets _ghostPlaced for next A).
+            // Don't move during animations/transitions
             if ((bool)FreezeField.GetValue(__instance))
             {
-                if (_buildPressHandled)
-                {
-                    _buildPressHandled = false;
-                    _ghostPlaced = true;
-                    if (ModEntry.Config.VerboseLogging)
-                        Monitor.Log("[CarpenterMenu] Action handled during freeze (demolish confirm pending)", LogLevel.Debug);
-                }
                 _overridingMousePosition = false;
                 return;
             }
@@ -647,6 +683,15 @@ namespace AndroidConsolizer.Patches
                     // Set _ghostPlaced so next A can confirm (if cursor doesn't move).
                     _buildPressHandled = false;
                     _ghostPlaced = true;
+
+                    // In demolish mode, detect which building was just selected
+                    // so the prefix can check cursor position on the next A press.
+                    if (isDemolishing && _demolishSelectedBuilding == null)
+                    {
+                        _demolishSelectedBuilding = GetBuildingAtCursor();
+                        if (ModEntry.Config.VerboseLogging)
+                            Monitor.Log($"[CarpenterMenu] Demolish: selected building = {_demolishSelectedBuilding?.buildingType.Value ?? "none"}", LogLevel.Debug);
+                    }
 
                     if (ModEntry.Config.VerboseLogging)
                     {
