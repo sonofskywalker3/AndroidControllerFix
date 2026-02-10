@@ -392,8 +392,43 @@ namespace AndroidConsolizer.Patches
                 // Wire trash (105) up → drop zone (was 106)
                 trash.upNeighborID = DropZoneId;
 
+                // Wire inventory grid ↔ drop zone: find rightmost-column inventory slots
+                // (those navigating right to sort or trash) and rewire the closest one to drop zone
+                int sortCenterY = sort.bounds.Y + sort.bounds.Height / 2;
+                int dropCenterY = dropY + 32;
+                int trashCenterY = trash.bounds.Y + trash.bounds.Height / 2;
+                int bestSlotId = -1;
+                int bestDist = int.MaxValue;
+
+                foreach (var cc in inventoryPage.allClickableComponents)
+                {
+                    if (cc.myID < 0 || cc.myID >= Game1.player.Items.Count)
+                        continue;
+                    if (cc.rightNeighborID != 106 && cc.rightNeighborID != 105)
+                        continue;
+
+                    int slotCenterY = cc.bounds.Y + cc.bounds.Height / 2;
+                    int distToSort = Math.Abs(slotCenterY - sortCenterY);
+                    int distToDrop = Math.Abs(slotCenterY - dropCenterY);
+                    int distToTrash = Math.Abs(slotCenterY - trashCenterY);
+
+                    // Wire to nearest sidebar component
+                    if (distToDrop <= distToSort && distToDrop <= distToTrash)
+                    {
+                        cc.rightNeighborID = DropZoneId;
+                        if (distToDrop < bestDist)
+                        {
+                            bestDist = distToDrop;
+                            bestSlotId = cc.myID;
+                        }
+                    }
+                }
+
+                if (bestSlotId >= 0)
+                    dropZone.leftNeighborID = bestSlotId;
+
                 if (ModEntry.Config.VerboseLogging)
-                    Monitor?.Log($"InventoryManagement: Injected drop zone at ({dropX},{dropY}), sort→drop→trash nav wired", LogLevel.Debug);
+                    Monitor?.Log($"InventoryManagement: Injected drop zone at ({dropX},{dropY}), sort→drop→trash nav wired, leftNeighbor={dropZone.leftNeighborID}", LogLevel.Debug);
             }
             catch (Exception ex)
             {
