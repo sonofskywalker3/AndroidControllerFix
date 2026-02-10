@@ -14,6 +14,9 @@ namespace AndroidConsolizer.Patches
     {
         private static IMonitor Monitor;
 
+        // DIAGNOSTIC v3.2.3: Track CursorSlotItem state across method calls
+        private static string DiagBeforeCursorItem = "(none)";
+
         /// <summary>Apply Harmony patches.</summary>
         public static void Apply(Harmony harmony, IMonitor monitor)
         {
@@ -58,7 +61,20 @@ namespace AndroidConsolizer.Patches
                     prefix: new HarmonyMethod(typeof(InventoryPagePatches), nameof(InventoryMenu_ReceiveLeftClick_Prefix))
                 );
 
-                Monitor.Log("InventoryPage patches applied successfully.", LogLevel.Trace);
+                // DIAGNOSTIC v3.2.3: Instrument receiveLeftClick + releaseLeftClick
+                harmony.Patch(
+                    original: AccessTools.Method(typeof(InventoryPage), nameof(InventoryPage.receiveLeftClick)),
+                    prefix: new HarmonyMethod(typeof(InventoryPagePatches), nameof(ReceiveLeftClick_DiagCapture)) { priority = Priority.First },
+                    postfix: new HarmonyMethod(typeof(InventoryPagePatches), nameof(ReceiveLeftClick_DiagResult))
+                );
+
+                harmony.Patch(
+                    original: AccessTools.Method(typeof(InventoryPage), "releaseLeftClick"),
+                    prefix: new HarmonyMethod(typeof(InventoryPagePatches), nameof(ReleaseLeftClick_DiagPre)),
+                    postfix: new HarmonyMethod(typeof(InventoryPagePatches), nameof(ReleaseLeftClick_DiagPost))
+                );
+
+                Monitor.Log("InventoryPage patches applied successfully (with v3.2.3 diagnostics).", LogLevel.Trace);
             }
             catch (Exception ex)
             {
@@ -358,6 +374,72 @@ namespace AndroidConsolizer.Patches
             {
                 Monitor.Log($"Error sorting inventory: {ex.Message}", LogLevel.Error);
             }
+        }
+
+        // ===== DIAGNOSTIC v3.2.3: Equipment/trash equip investigation =====
+
+        /// <summary>Capture CursorSlotItem BEFORE receiveLeftClick runs (high priority prefix).</summary>
+        private static void ReceiveLeftClick_DiagCapture(int x, int y)
+        {
+            DiagBeforeCursorItem = Game1.player.CursorSlotItem?.Name ?? "(none)";
+        }
+
+        /// <summary>Log results AFTER receiveLeftClick runs — mouse pos, component bounds, cursor state.</summary>
+        private static void ReceiveLeftClick_DiagResult(InventoryPage __instance, int x, int y, bool playSound)
+        {
+            try
+            {
+                string after = Game1.player.CursorSlotItem?.Name ?? "(none)";
+                int mX = Game1.getMouseX();
+                int mY = Game1.getMouseY();
+                var ms = Mouse.GetState();
+
+                Monitor.Log($"[DIAG] rcvLeftClick: params=({x},{y}) mouse=({mX},{mY}) rawMouse=({ms.X},{ms.Y})", LogLevel.Info);
+                Monitor.Log($"[DIAG]   cursor: {DiagBeforeCursorItem} -> {after}", LogLevel.Info);
+
+                // When holding an item, dump all non-inventory component bounds so we can see what the game sees
+                if (DiagBeforeCursorItem != "(none)" && __instance.allClickableComponents != null)
+                {
+                    foreach (var comp in __instance.allClickableComponents)
+                    {
+                        if (comp.myID >= 100)
+                            Monitor.Log($"[DIAG]   comp ID={comp.myID} name='{comp.name}' bounds={comp.bounds} hit={comp.containsPoint(x, y)}", LogLevel.Info);
+                    }
+
+                    // Check trashCan directly (may be a separate field, not in allClickableComponents)
+                    var trashCan = AccessTools.Field(typeof(InventoryPage), "trashCan")?.GetValue(__instance) as ClickableTextureComponent;
+                    if (trashCan != null)
+                        Monitor.Log($"[DIAG]   trashCan bounds={trashCan.bounds} hit={trashCan.containsPoint(x, y)} myID={trashCan.myID}", LogLevel.Info);
+                }
+            }
+            catch (Exception ex)
+            {
+                Monitor.Log($"[DIAG] rcvLeftClick error: {ex.Message}", LogLevel.Error);
+            }
+        }
+
+        /// <summary>Log BEFORE releaseLeftClick — does touch-equip go through this path?</summary>
+        private static void ReleaseLeftClick_DiagPre(IClickableMenu __instance, int x, int y)
+        {
+            if (__instance is not InventoryPage) return;
+            try
+            {
+                string cursor = Game1.player.CursorSlotItem?.Name ?? "(none)";
+                Monitor.Log($"[DIAG] releaseLeftClick PRE: ({x},{y}) cursor={cursor}", LogLevel.Info);
+            }
+            catch { }
+        }
+
+        /// <summary>Log AFTER releaseLeftClick — did CursorSlotItem get consumed?</summary>
+        private static void ReleaseLeftClick_DiagPost(IClickableMenu __instance, int x, int y)
+        {
+            if (__instance is not InventoryPage) return;
+            try
+            {
+                string cursor = Game1.player.CursorSlotItem?.Name ?? "(none)";
+                Monitor.Log($"[DIAG] releaseLeftClick POST: ({x},{y}) cursor={cursor}", LogLevel.Info);
+            }
+            catch { }
         }
     }
 }
