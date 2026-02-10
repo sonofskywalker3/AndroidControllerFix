@@ -2,7 +2,7 @@
 
 A SMAPI mod that brings console-style controller support to Android Stardew Valley. Play with a controller like you would on Nintendo Switch - 12-slot toolbar rows, proper shop purchasing, chest management, and more.
 
-## Current Version: 3.1.0
+## Current Version: 3.2.0 — The Robin Release
 
 ## Features
 
@@ -66,9 +66,19 @@ When "Use Bumpers Instead of Triggers" is enabled:
 - Tooltips appear on hover when navigating with controller
 - Fishing rod tooltips shown when holding bait or tackle
 
-### Carpenter Menu Fix
+### Carpenter Menu (Robin's Build Menu)
 - Prevents Robin's building menu from instantly closing when opened with controller
-- Configurable grace period blocks input carry-over from dialogue
+- **Full joystick control in farm view** — Build, Move, and Demolish all work with the controller
+  - Left stick moves a visible cursor across the farm, panning the viewport at screen edges
+  - **Build mode**: Building ghost follows your cursor in real time. Press A to confirm placement.
+  - **Move mode**: Press A to select a building, move cursor to new location, press A to confirm.
+  - **Demolish mode**: Press A on a building to highlight it (green), press A again to confirm demolition. Move cursor off the building to deselect without demolishing.
+  - Touch still works normally alongside the joystick cursor
+
+### Furniture Placement Fix
+- Y button no longer rapid-toggles furniture between picked up and placed
+- One press = one interaction (pickup OR placement, never both)
+- Works for all furniture types including beds
 
 ### Fishing Rod Bait/Tackle Fix
 - **A button on bait/tackle**: Pick up to cursor for attachment
@@ -102,6 +112,10 @@ When "Use Bumpers Instead of Triggers" is enabled:
 | **Shipping Bin** | Y | Ship one item |
 | **Inventory** | A (on bait/tackle) | Pick up bait/tackle to cursor |
 | **Inventory** | Y (on fishing rod) | Attach held bait/tackle or detach to cursor |
+| **Building (farm view)** | Left stick | Move cursor / pan viewport at edges |
+| **Building (build)** | A | Confirm building placement at cursor |
+| **Building (move)** | A | Select building / confirm new placement |
+| **Building (demolish)** | A | Select building (highlights green) / confirm demolition |
 
 ## Dependencies
 
@@ -154,6 +168,7 @@ Edit `config.json` or use Generic Mod Config Menu in-game:
   "EnableJournalButton": true,
   "EnableCutsceneSkip": true,
   "EnableCarpenterMenuFix": true,
+  "EnableFurnitureDebounce": true,
   "UseBumpersInsteadOfTriggers": false,
   "VerboseLogging": false
 }
@@ -170,7 +185,8 @@ Edit `config.json` or use Generic Mod Config Menu in-game:
 | `EnableConsoleShipping` | A ships full stack, Y ships one item from the shipping bin |
 | `EnableJournalButton` | Start button opens the Quest Log/Journal instead of inventory |
 | `EnableCutsceneSkip` | Press Start twice during a skippable cutscene to skip it |
-| `EnableCarpenterMenuFix` | Prevent Robin's building menu from instantly closing |
+| `EnableCarpenterMenuFix` | Prevent Robin's building menu from instantly closing + joystick farm view controls |
+| `EnableFurnitureDebounce` | Prevent furniture from rapid-toggling between picked up and placed |
 | `UseBumpersInsteadOfTriggers` | Use LB/RB instead of LT/RT (for Xbox Bluetooth controllers) |
 | `VerboseLogging` | Enable detailed debug logging |
 
@@ -215,9 +231,8 @@ Output: `bin/Release/net6.0/AndroidConsolizer X.X.X.zip`
 
 ## Known Issues
 
-- Move Buildings mode in Robin's menu doesn't respond to joystick panning
+- Clicking "Build" for a building you can't afford exits to the shop screen (investigating whether this is vanilla Android behavior)
 - Shop sell tab not navigable when switched via touchscreen tap (Y button works)
-- ~~Furniture pickup/placement rapid-toggles with Y button~~ Fixed in v3.1.13
 - Equipment slots not accessible via A button in inventory
 - Community Center bundle navigation and cursor issues
 - Social tab cursor doesn't visually follow when switching tabs with LB/RB
@@ -228,14 +243,13 @@ Output: `bin/Release/net6.0/AndroidConsolizer X.X.X.zip`
 
 ## TODO / Roadmap
 
+- Equipment slot A-button fix
 - Right joystick free cursor mode for menus and gameplay
 - Zoom control slider in options menu
 - Intentional item drop with controller (L3 while holding item)
 - Museum donation menu controller support
 - Settings menu snap navigation
 - Cutscene skip visual fix (skip button renders behind dialogue)
-- Furniture placement debounce
-- Equipment slot A-button fix
 - Expanded controller testing (8BitDo, DualSense, etc.)
 
 ## Why "Consolizer"?
@@ -253,6 +267,18 @@ Android Stardew Valley has broken controller support that makes it nearly unplay
 MIT License - Feel free to modify and redistribute.
 
 ## Changelog
+
+### 3.2.0 — The Robin Release
+- **Robin's Build Menu — Full Controller Support** - Build, Move, and Demolish all work with the joystick
+  - Building ghost follows your cursor in real time across the farm
+  - **Build mode**: Move cursor to desired location, press A to place the building
+  - **Move mode**: Press A to select a building, move cursor to new location, press A to confirm
+  - **Demolish mode**: Press A on a building to highlight it green, press A again to demolish. Move cursor away to safely deselect without demolishing
+  - Left stick pans the viewport when cursor reaches screen edges
+  - Visible cursor rendered in farm view so you always know where you're pointing
+- **Furniture Placement Fix** - Y button no longer rapid-toggles furniture between picked up and placed
+  - One press = one interaction, works for all furniture types including beds
+  - New `EnableFurnitureDebounce` config toggle (enabled by default)
 
 ### 3.1.0
 - **Cleanup Update** - No behavior changes, internal housekeeping only
