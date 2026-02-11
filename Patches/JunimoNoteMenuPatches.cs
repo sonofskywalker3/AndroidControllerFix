@@ -521,28 +521,32 @@ namespace AndroidConsolizer.Patches
                     int dx = ox - cx;
                     int dy = oy - cy;
 
-                    // Right: must be to the right, penalize vertical offset 2x
-                    if (dx > 0)
+                    int adx = Math.Abs(dx);
+                    int ady = Math.Abs(dy);
+
+                    // Right: must be to the right, and not nearly perpendicular
+                    // Angle filter: require adx > ady/4 (~76 degree cone)
+                    if (dx > 0 && adx > ady / 4)
                     {
-                        int score = dx + Math.Abs(dy) * 2;
+                        int score = dx + ady * 2;
                         if (score < bestRightScore) { bestRightScore = score; bestRightId = other.myID; }
                     }
-                    // Left: must be to the left
-                    if (dx < 0)
+                    // Left
+                    if (dx < 0 && adx > ady / 4)
                     {
-                        int score = -dx + Math.Abs(dy) * 2;
+                        int score = adx + ady * 2;
                         if (score < bestLeftScore) { bestLeftScore = score; bestLeftId = other.myID; }
                     }
-                    // Down: must be below, penalize horizontal offset 2x
-                    if (dy > 0)
+                    // Down
+                    if (dy > 0 && ady > adx / 4)
                     {
-                        int score = dy + Math.Abs(dx) * 2;
+                        int score = dy + adx * 2;
                         if (score < bestDownScore) { bestDownScore = score; bestDownId = other.myID; }
                     }
-                    // Up: must be above
-                    if (dy < 0)
+                    // Up
+                    if (dy < 0 && ady > adx / 4)
                     {
-                        int score = -dy + Math.Abs(dx) * 2;
+                        int score = ady + adx * 2;
                         if (score < bestUpScore) { bestUpScore = score; bestUpId = other.myID; }
                     }
                 }
