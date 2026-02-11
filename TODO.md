@@ -174,6 +174,8 @@ These need to be re-implemented **one at a time, one per 0.0.1 patch, each commi
 - **Reference:** `FishingRodPatches` handles `FishingRod` with `attachments[0]` (bait) and `attachments[1]` (tackle). Slingshot uses `attachments[0]` for ammo.
 - **Implementation:** Create `SlingshotPatches.cs` mirroring `FishingRodPatches` structure, but for `Slingshot` type. Check `item is Slingshot`, handle single attachment slot `attachments[0]`. Need to determine ammo category — likely `SObject.ammoCategoryId` or check item type. Y on slingshot while holding ammo = attach, Y on slingshot while empty-handed = detach to cursor.
 - **File:** New `Patches/SlingshotPatches.cs`, wire into `ModEntry.OnButtonsChanged` alongside `FishingRodPatches.TryHandleBaitTackle`.
+- **Log evidence (v3.2.13):** User pressed Y on slingshot in slot 5 while holding Stone/Copper Ore. FishingRod code fired but correctly rejected: `FishingRod: Slot 5 is not a fishing rod: Slingshot`. Y-pickup-single then tried to stack, failed with "Cannot stack different items." No slingshot-specific handling exists yet.
+- **Also see #25b** for slingshot combat/aiming issues (separate from inventory ammo management).
 - **Priority:** Medium — quality of life for slingshot users.
 
 ### 12. Right Joystick Cursor Mode + Zoom Control
@@ -360,6 +362,25 @@ These need to be re-implemented **one at a time, one per 0.0.1 patch, each commi
   - Compare each result to Switch behavior
   - Note: Copper adds no charge mechanic, Steel = 1 charge level, Gold = 2, Iridium = 3
 
+### 25b. Slingshot Combat Broken on Android — NEEDS INVESTIGATION
+- **Symptom:** Having the slingshot equipped stops the player from moving. User wasn't sure what to do with joystick and tool button. The slingshot doesn't behave like console at all.
+- **Expected behavior (console/Switch):** Player can move freely with slingshot equipped. Hold Y (tool button) to enter aiming mode — player stops moving, left stick moves crosshairs around. Release Y to fire in the crosshair direction. This is a pull-back-and-release mechanic like a real slingshot.
+- **Log evidence (v3.2.13, UndergroundMine35, 20:34:06-20:34:26):**
+  - Slingshot was in toolbar slot 5. User entered UndergroundMine35 at 20:34:05.
+  - User alternated ControllerX (tool button, physical Y with default layout) with LeftThumbstick directions.
+  - ControllerX was pressed ~13 times over 20 seconds with thumbstick movements between.
+  - No slingshot-specific log output — our mod doesn't intercept slingshot overworld use.
+  - Player appeared unable to move normally (rapid thumbstick presses in multiple directions suggest fighting against something).
+- **Key question:** Is this a vanilla Android bug or something our mod introduces?
+  - Our `GameplayButtonPatches.GetState_Postfix` swaps X/Y buttons — could this interfere with the slingshot's pull-back mechanic? The slingshot likely reads tool button state continuously (not just on press), and our swap might confuse the held state.
+  - The slingshot on console uses a special aiming mode where left stick switches from movement to crosshair control. Android may not implement this mode switch, or our gamepad state patches might break it.
+- **Investigation needed:**
+  1. Test with mod disabled — does vanilla Android slingshot work correctly with controller?
+  2. If vanilla is also broken, this is an Android port issue (like tool charging #25).
+  3. If vanilla works but our mod breaks it, check `GameplayButtonPatches.GetState_Postfix` — the X/Y swap may need to be disabled during slingshot use (check `Game1.player.CurrentTool is Slingshot`).
+  4. Decompile `Slingshot.beginUsing()`, `Slingshot.tickUpdate()`, `Slingshot.endUsing()` to understand the aiming state machine.
+- **Possibly related to #25** (tool charging broken while moving) — both involve the left stick interacting with tool-use state.
+
 ### 26. SMAPI / Mod Menu Button Position (G Cloud Title Screen)
 - Probably not our bug
 - On Logitech G Cloud, the SMAPI details and mod menu button on the title screen are positioned ~1/3 up the screen instead of in the corner. Cannot tap on them, and pressing A with the controller cursor does nothing.
@@ -408,7 +429,7 @@ Performance investigation (v2.7.14 session): Game starts at 60fps, degrades to ~
 - ~~Console-style shop (hold-A to buy)~~ - Intentionally kept enhanced quantity selector instead. Our approach is better: select exact quantity with LT/RT before buying vs. hold-A and hope. Console has no undo for over-purchasing.
 - ~~Dialogue text completion~~ - Not reproducible. Tested on Odin Pro and Logitech G Cloud — first A completes text, second A advances. Works correctly. Keep on radar for Bluetooth controllers only.
 - ~~Hold-to-repeat tool actions~~ - Confirmed working on Logitech G Cloud. Holding Y to multi-swing tools (chop/mine/water) works correctly. Previously reported as broken — may have been fixed in a game update or was device-specific.
-- ~~Slingshot controller fix~~ - NOT YET TESTED. Kept here as reminder — needs testing when slingshot is available (mines floor 40+). Previous reports of rapid-fire/freeze may or may not still apply.
+- ~~Slingshot controller fix~~ - **TESTED — BROKEN. See #11c and #25b for details.**
 
 ---
 
