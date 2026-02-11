@@ -16,7 +16,8 @@ namespace AndroidConsolizer.Patches
     internal static class JunimoNoteMenuPatches
     {
         private static IMonitor Monitor;
-        private static bool _hasLoggedComponents = false;
+        private static bool _hasLoggedOverview = false;
+        private static bool _hasLoggedBundlePage = false;
 
         public static void Apply(Harmony harmony, IMonitor monitor)
         {
@@ -46,7 +47,8 @@ namespace AndroidConsolizer.Patches
         /// <summary>Reset logging flag when menu changes.</summary>
         public static void OnMenuChanged()
         {
-            _hasLoggedComponents = false;
+            _hasLoggedOverview = false;
+            _hasLoggedBundlePage = false;
         }
 
         private static void ReceiveGamePadButton_Prefix(JunimoNoteMenu __instance, Microsoft.Xna.Framework.Input.Buttons b)
@@ -128,16 +130,22 @@ namespace AndroidConsolizer.Patches
             {
                 bool specificBundle = GetSpecificBundlePage(__instance);
 
-                // Log components once when we enter the specific bundle page
-                if (specificBundle && !_hasLoggedComponents)
+                // Log overview page components once
+                if (!specificBundle && !_hasLoggedOverview)
                 {
-                    _hasLoggedComponents = true;
+                    _hasLoggedOverview = true;
+                    _hasLoggedBundlePage = false; // Reset for next bundle page entry
+                    Monitor.Log("[JunimoNote DIAG] === OVERVIEW PAGE (bundle selection) ===", LogLevel.Info);
                     LogAllComponents(__instance);
                 }
-                else if (!specificBundle)
+
+                // Log bundle page components once
+                if (specificBundle && !_hasLoggedBundlePage)
                 {
-                    // Reset so we log again if they open another bundle
-                    _hasLoggedComponents = false;
+                    _hasLoggedBundlePage = true;
+                    _hasLoggedOverview = false; // Reset for when we go back to overview
+                    Monitor.Log("[JunimoNote DIAG] === SPECIFIC BUNDLE PAGE (ingredient donation) ===", LogLevel.Info);
+                    LogAllComponents(__instance);
                 }
             }
             catch (Exception ex)
