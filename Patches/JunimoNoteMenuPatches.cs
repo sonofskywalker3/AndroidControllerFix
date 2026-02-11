@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using StardewModdingAPI;
 using StardewValley;
@@ -14,30 +15,37 @@ namespace AndroidConsolizer.Patches
     /// Patches for JunimoNoteMenu (Community Center bundles).
     /// Fixes controller navigation on the bundle donation page where Android's
     /// currentlySnappedComponent stays null and A-press clicks go to wrong coordinates.
-    /// We manage our own cursor and generate correct click coordinates.
+    ///
+    /// Key insight: On Android, receiveLeftClick reads GetMouseState() internally instead
+    /// of using its x,y parameters. We override GetMouseState during the A-press window
+    /// (same pattern as CarpenterMenuPatches) so the game reads our tracked position.
+    ///
+    /// Touch is NOT intercepted — no receiveLeftClick prefix, and the GetMouseState
+    /// override is only active during the brief A-press window.
     /// </summary>
     internal static class JunimoNoteMenuPatches
     {
         private static IMonitor Monitor;
 
-        // Cached reflection fields
+        // Cached reflection
         private static FieldInfo _specificBundlePageField;
-        private static FieldInfo _ingredientSlotsField;
-        private static FieldInfo _ingredientListField;
 
-        // Our tracked cursor position on the bundle donation page
+        // Navigation tracking on the bundle donation page
         private static ClickableComponent _trackedComponent = null;
         private static bool _onBundlePage = false;
         private static bool _needsInit = false;
+
+        // GetMouseState override — active only during A-press window
+        private static bool _overrideMousePosition = false;
+        private static int _overrideMouseX;
+        private static int _overrideMouseY;
+        private static int _overrideSetTick = -1;
 
         public static void Apply(Harmony harmony, IMonitor monitor)
         {
             Monitor = monitor;
 
-            // Cache reflection
             _specificBundlePageField = AccessTools.Field(typeof(JunimoNoteMenu), "specificBundlePage");
-            _ingredientSlotsField = AccessTools.Field(typeof(JunimoNoteMenu), "ingredientSlots");
-            _ingredientListField = AccessTools.Field(typeof(JunimoNoteMenu), "ingredientList");
 
             harmony.Patch(
                 original: AccessTools.Method(typeof(JunimoNoteMenu), nameof(JunimoNoteMenu.receiveGamePadButton)),
@@ -45,14 +53,43 @@ namespace AndroidConsolizer.Patches
             );
 
             harmony.Patch(
-                original: AccessTools.Method(typeof(JunimoNoteMenu), nameof(JunimoNoteMenu.receiveLeftClick)),
-                prefix: new HarmonyMethod(typeof(JunimoNoteMenuPatches), nameof(ReceiveLeftClick_Prefix))
-            );
-
-            harmony.Patch(
                 original: AccessTools.Method(typeof(JunimoNoteMenu), "update", new[] { typeof(GameTime) }),
                 postfix: new HarmonyMethod(typeof(JunimoNoteMenuPatches), nameof(Update_Postfix))
             );
+
+            harmony.Patch(
+                original: AccessTools.Method(typeof(JunimoNoteMenu), "draw", new[] { typeof(SpriteBatch) }),
+                postfix: new HarmonyMethod(typeof(JunimoNoteMenuPatches), nameof(Draw_Postfix))
+            );
+
+            // GetMouseState override — same pattern as CarpenterMenuPatches.
+            // Both postfixes can coexist: each checks its own flag and only one
+            // menu can be open at a time.
+            try
+            {
+                var inputType = Game1.input.GetType();
+                var getMouseStateMethod = AccessTools.Method(inputType, "GetMouseState");
+                if (getMouseStateMethod != null)
+                {
+                    harmony.Patch(
+                        original: getMouseStateMethod,
+                        postfix: new HarmonyMethod(typeof(JunimoNoteMenuPatches), nameof(GetMouseState_Postfix))
+                    );
+                }
+
+                var xnaMouseGetState = AccessTools.Method(typeof(Mouse), nameof(Mouse.GetState));
+                if (xnaMouseGetState != null)
+                {
+                    harmony.Patch(
+                        original: xnaMouseGetState,
+                        postfix: new HarmonyMethod(typeof(JunimoNoteMenuPatches), nameof(GetMouseState_Postfix))
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                Monitor.Log($"[JunimoNote] Failed to patch GetMouseState: {ex.Message}", LogLevel.Error);
+            }
 
             Monitor.Log("JunimoNoteMenu patches applied.", LogLevel.Trace);
         }
@@ -62,21 +99,21 @@ namespace AndroidConsolizer.Patches
             _trackedComponent = null;
             _onBundlePage = false;
             _needsInit = false;
+            _overrideMousePosition = false;
         }
 
         /// <summary>
-        /// On the bundle donation page, intercept all gamepad input.
-        /// We manage navigation ourselves and fire receiveLeftClick at correct coordinates.
+        /// On the bundle donation page, intercept navigation and A-press.
+        /// For A: activate GetMouseState override so the game reads our tracked position,
+        /// then let the game's own A handler run naturally.
         /// </summary>
         private static bool ReceiveGamePadButton_Prefix(JunimoNoteMenu __instance, Buttons b)
         {
             try
             {
-                bool specificBundle = GetSpecificBundlePage(__instance);
-                if (!specificBundle)
+                if (!GetSpecificBundlePage(__instance))
                     return true; // Overview page — let game handle it
 
-                // On the bundle donation page, handle navigation ourselves
                 switch (b)
                 {
                     case Buttons.LeftThumbstickLeft:
@@ -100,21 +137,31 @@ namespace AndroidConsolizer.Patches
                         return false;
 
                     case Buttons.A:
-                        // Set mouse + snapped component, then let the game's A handler run
                         if (_trackedComponent != null)
                         {
                             var center = _trackedComponent.bounds.Center;
+
+                            // Activate GetMouseState override so the game reads our position
+                            // when it internally calls GetMouseState during receiveLeftClick.
+                            // Coordinates must be in raw screen pixels (game divides by zoom).
+                            float zoom = Game1.options.zoomLevel;
+                            _overrideMouseX = (int)(center.X * zoom);
+                            _overrideMouseY = (int)(center.Y * zoom);
+                            _overrideMousePosition = true;
+                            _overrideSetTick = Game1.ticks;
+
+                            // Also set mouse position directly for any code that reads it
                             Game1.setMousePosition(center.X, center.Y);
                             __instance.currentlySnappedComponent = _trackedComponent;
-                            Monitor.Log($"[JunimoNote] A: set mouse to ({center.X},{center.Y}) on id={_trackedComponent.myID} '{_trackedComponent.name}'", LogLevel.Debug);
+
+                            Monitor.Log($"[JunimoNote] A: override mouse to ({center.X},{center.Y}) raw=({_overrideMouseX},{_overrideMouseY}) on id={_trackedComponent.myID} '{_trackedComponent.name}'", LogLevel.Debug);
                         }
-                        return true; // Let game handle A with correct position
+                        return true; // Let game handle A — it will read our overridden mouse
 
                     case Buttons.B:
-                        // Let the game handle B (close bundle page / close menu)
-                        // But reset our tracking since we're leaving the bundle page
                         _trackedComponent = null;
                         _onBundlePage = false;
+                        _overrideMousePosition = false;
                         return true;
                 }
             }
@@ -123,40 +170,16 @@ namespace AndroidConsolizer.Patches
                 Monitor.Log($"[JunimoNote] receiveGamePadButton error: {ex.Message}", LogLevel.Debug);
             }
 
-            return true; // Other buttons pass through
+            return true;
         }
 
-        /// <summary>
-        /// On the bundle donation page, redirect gamepad-triggered clicks to the tracked component.
-        /// Touch clicks pass through as-is.
-        /// </summary>
-        private static void ReceiveLeftClick_Prefix(JunimoNoteMenu __instance, ref int x, ref int y)
-        {
-            try
-            {
-                bool specificBundle = GetSpecificBundlePage(__instance);
-                if (!specificBundle || _trackedComponent == null)
-                    return;
-
-                // If mouse position is far from any inventory/ingredient component,
-                // it's likely a gamepad-triggered click at stale coordinates.
-                // Redirect to our tracked component.
-                var center = _trackedComponent.bounds.Center;
-                if (Math.Abs(x - center.X) > 200 || Math.Abs(y - center.Y) > 200)
-                {
-                    Monitor.Log($"[JunimoNote] Redirecting click from ({x},{y}) to tracked ({center.X},{center.Y}) id={_trackedComponent.myID}", LogLevel.Debug);
-                    x = center.X;
-                    y = center.Y;
-                }
-            }
-            catch (Exception ex)
-            {
-                Monitor.Log($"[JunimoNote] receiveLeftClick prefix error: {ex.Message}", LogLevel.Debug);
-            }
-        }
+        // NO receiveLeftClick prefix — that was breaking touch by redirecting all clicks
+        // to the tracked position. Touch clicks don't go through receiveGamePadButton,
+        // so the GetMouseState override is never active for them.
 
         /// <summary>
-        /// Detect when we enter/leave the bundle donation page and initialize cursor.
+        /// Detect bundle page entry/exit. Clear GetMouseState override after timeout.
+        /// Does NOT continuously drive cursor position (that was fighting the game).
         /// </summary>
         private static void Update_Postfix(JunimoNoteMenu __instance, GameTime time)
         {
@@ -166,15 +189,14 @@ namespace AndroidConsolizer.Patches
 
                 if (specificBundle && !_onBundlePage)
                 {
-                    // Just entered the bundle donation page — initialize cursor
                     _onBundlePage = true;
                     _needsInit = true;
                 }
                 else if (!specificBundle && _onBundlePage)
                 {
-                    // Left the bundle page
                     _onBundlePage = false;
                     _trackedComponent = null;
+                    _overrideMousePosition = false;
                 }
 
                 // Defer init by one frame so allClickableComponents is fully populated
@@ -184,15 +206,11 @@ namespace AndroidConsolizer.Patches
                     InitializeCursor(__instance);
                 }
 
-                // Keep the visual cursor at our tracked component
-                if (specificBundle && _trackedComponent != null)
+                // Safety: clear GetMouseState override after 3 ticks.
+                // The touch-simulated receiveLeftClick fires within 1-2 ticks of A press.
+                if (_overrideMousePosition && Game1.ticks - _overrideSetTick > 3)
                 {
-                    __instance.currentlySnappedComponent = _trackedComponent;
-                    var center = _trackedComponent.bounds.Center;
-                    Game1.setMousePosition(center.X, center.Y);
-                    __instance.snapCursorToCurrentSnappedComponent();
-                    // Drive hover highlight so the game renders the selection box
-                    __instance.performHoverAction(center.X, center.Y);
+                    _overrideMousePosition = false;
                 }
             }
             catch (Exception ex)
@@ -201,15 +219,63 @@ namespace AndroidConsolizer.Patches
             }
         }
 
+        /// <summary>
+        /// Draw a visible highlight around the tracked component on the bundle page.
+        /// The game's own cursor rendering doesn't work with our approach, so we draw our own.
+        /// </summary>
+        private static void Draw_Postfix(JunimoNoteMenu __instance, SpriteBatch b)
+        {
+            if (!_onBundlePage || _trackedComponent == null)
+                return;
+
+            try
+            {
+                var bounds = _trackedComponent.bounds;
+
+                // Draw yellow border around the tracked component
+                Color borderColor = Color.Yellow;
+                int bw = 3;
+                Texture2D pixel = Game1.staminaRect;
+                // Top
+                b.Draw(pixel, new Rectangle(bounds.X - bw, bounds.Y - bw, bounds.Width + bw * 2, bw), borderColor);
+                // Bottom
+                b.Draw(pixel, new Rectangle(bounds.X - bw, bounds.Y + bounds.Height, bounds.Width + bw * 2, bw), borderColor);
+                // Left
+                b.Draw(pixel, new Rectangle(bounds.X - bw, bounds.Y, bw, bounds.Height), borderColor);
+                // Right
+                b.Draw(pixel, new Rectangle(bounds.X + bounds.Width, bounds.Y, bw, bounds.Height), borderColor);
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// GetMouseState postfix — when override is active, replace X/Y with our
+        /// tracked component position. Only active for ~3 ticks after A press.
+        /// Touch is unaffected (override is never set for touch input).
+        /// </summary>
+        private static void GetMouseState_Postfix(ref MouseState __result)
+        {
+            if (!_overrideMousePosition)
+                return;
+
+            __result = new MouseState(
+                _overrideMouseX, _overrideMouseY,
+                __result.ScrollWheelValue,
+                __result.LeftButton,
+                __result.MiddleButton,
+                __result.RightButton,
+                __result.XButton1,
+                __result.XButton2
+            );
+        }
+
         /// <summary>Initialize the cursor to the first inventory slot.</summary>
         private static void InitializeCursor(JunimoNoteMenu menu)
         {
-            // Start at inventory slot 0
             if (menu.inventory?.inventory != null && menu.inventory.inventory.Count > 0)
             {
                 _trackedComponent = menu.inventory.inventory[0];
                 menu.currentlySnappedComponent = _trackedComponent;
-                menu.snapCursorToCurrentSnappedComponent();
                 Monitor.Log($"[JunimoNote] Initialized cursor to inv slot 0, bounds={_trackedComponent.bounds}", LogLevel.Debug);
             }
         }
@@ -234,23 +300,20 @@ namespace AndroidConsolizer.Patches
             }
 
             if (neighborId == -1 || neighborId == -500)
-                return; // No neighbor in that direction
+                return;
 
             ClickableComponent target = null;
 
             if (neighborId == -99998)
             {
-                // Auto-snap: find nearest component in the given direction
                 target = FindNearestInDirection(menu, _trackedComponent, direction);
             }
             else if (neighborId == -7777)
             {
-                // Custom snap — skip (bundle icons use this, don't want to navigate to them)
-                return;
+                return; // Bundle icons — don't navigate to them
             }
             else
             {
-                // Direct neighbor ID
                 target = menu.getComponentWithID(neighborId);
             }
 
@@ -258,7 +321,6 @@ namespace AndroidConsolizer.Patches
             {
                 _trackedComponent = target;
                 menu.currentlySnappedComponent = _trackedComponent;
-                menu.snapCursorToCurrentSnappedComponent();
                 Game1.playSound("shiny4");
             }
         }
@@ -275,8 +337,8 @@ namespace AndroidConsolizer.Patches
             foreach (var comp in menu.allClickableComponents)
             {
                 if (comp == from) continue;
-                if (comp.myID == -500) continue; // Skip back/nav buttons with broken IDs
-                if (comp.fullyImmutable) continue; // Skip bundle icons
+                if (comp.myID == -500) continue;
+                if (comp.fullyImmutable) continue;
 
                 var compCenter = comp.bounds.Center;
                 bool valid = false;
@@ -295,7 +357,6 @@ namespace AndroidConsolizer.Patches
                 float dy = compCenter.Y - fromCenter.Y;
                 float dist;
 
-                // Weight: heavily favor components aligned on the perpendicular axis
                 if (direction == "left" || direction == "right")
                     dist = Math.Abs(dx) + Math.Abs(dy) * 3f;
                 else
