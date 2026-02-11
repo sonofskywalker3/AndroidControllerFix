@@ -41,6 +41,9 @@ namespace AndroidConsolizer.Patches
         private static int _enteredPageTick = -100;
         private static bool _weInitiatedClick;
 
+        // Diagnostic: overview page component dump (one-time per page entry)
+        private static bool _dumpedOverviewComponents;
+
         public static void Apply(Harmony harmony, IMonitor monitor)
         {
             Monitor = monitor;
@@ -80,7 +83,8 @@ namespace AndroidConsolizer.Patches
             // receiveGamePadButton — handle navigation and A press
             harmony.Patch(
                 original: AccessTools.Method(typeof(JunimoNoteMenu), nameof(JunimoNoteMenu.receiveGamePadButton)),
-                prefix: new HarmonyMethod(typeof(JunimoNoteMenuPatches), nameof(ReceiveGamePadButton_Prefix))
+                prefix: new HarmonyMethod(typeof(JunimoNoteMenuPatches), nameof(ReceiveGamePadButton_Prefix)),
+                postfix: new HarmonyMethod(typeof(JunimoNoteMenuPatches), nameof(ReceiveGamePadButton_Postfix))
             );
 
             // update — detect page transitions, keep cursor in sync
@@ -104,6 +108,7 @@ namespace AndroidConsolizer.Patches
         {
             _onDonationPage = false;
             _overridingMouse = false;
+            _dumpedOverviewComponents = false;
         }
 
         // ===== GetMouseState postfix =====
@@ -147,7 +152,12 @@ namespace AndroidConsolizer.Patches
             try
             {
                 if (!GetSpecificBundlePage(__instance))
+                {
+                    // DIAGNOSTIC: Log overview page navigation before game handles it
+                    var snapped = __instance.currentlySnappedComponent;
+                    Monitor.Log($"[JunimoNote:Overview] BEFORE button={b} snapped={FormatComponent(snapped)}", LogLevel.Debug);
                     return true; // not on donation page — let game handle
+                }
 
                 switch (b)
                 {
@@ -184,6 +194,20 @@ namespace AndroidConsolizer.Patches
                 Monitor.Log($"[JunimoNote] receiveGamePadButton error: {ex}", LogLevel.Error);
                 return true;
             }
+        }
+
+        // ===== receiveGamePadButton postfix (diagnostic) =====
+
+        private static void ReceiveGamePadButton_Postfix(JunimoNoteMenu __instance, Buttons b)
+        {
+            try
+            {
+                if (GetSpecificBundlePage(__instance)) return; // donation page handled by prefix
+
+                var snapped = __instance.currentlySnappedComponent;
+                Monitor.Log($"[JunimoNote:Overview] AFTER  button={b} snapped={FormatComponent(snapped)}", LogLevel.Debug);
+            }
+            catch { }
         }
 
         // ===== Navigation =====
@@ -263,6 +287,13 @@ namespace AndroidConsolizer.Patches
             {
                 bool specificBundle = GetSpecificBundlePage(__instance);
 
+                // DIAGNOSTIC: One-time dump of overview page components
+                if (!specificBundle && !_dumpedOverviewComponents)
+                {
+                    _dumpedOverviewComponents = true;
+                    DumpOverviewComponents(__instance);
+                }
+
                 if (specificBundle && !_onDonationPage)
                 {
                     _onDonationPage = true;
@@ -282,6 +313,7 @@ namespace AndroidConsolizer.Patches
                 {
                     _onDonationPage = false;
                     _overridingMouse = false;
+                    _dumpedOverviewComponents = false; // re-dump when returning to overview
                     Monitor.Log("[JunimoNote] Left donation page", LogLevel.Debug);
                 }
 
@@ -351,6 +383,72 @@ namespace AndroidConsolizer.Patches
             {
                 _overridingMouse = false;
             }
+        }
+
+        // ===== Diagnostic helpers =====
+
+        private static void DumpOverviewComponents(JunimoNoteMenu menu)
+        {
+            Monitor.Log("========== JUNIMO NOTE OVERVIEW: COMPONENT DUMP ==========", LogLevel.Debug);
+            Monitor.Log($"Menu position: ({menu.xPositionOnScreen},{menu.yPositionOnScreen}) size {menu.width}x{menu.height}", LogLevel.Debug);
+            Monitor.Log($"currentlySnappedComponent: {FormatComponent(menu.currentlySnappedComponent)}", LogLevel.Debug);
+
+            if (menu.allClickableComponents != null)
+            {
+                Monitor.Log($"allClickableComponents count: {menu.allClickableComponents.Count}", LogLevel.Debug);
+                for (int i = 0; i < menu.allClickableComponents.Count; i++)
+                {
+                    var c = menu.allClickableComponents[i];
+                    Monitor.Log($"  [{i}] id={c.myID} name='{c.name}' label='{c.label}' " +
+                        $"bounds=({c.bounds.X},{c.bounds.Y},{c.bounds.Width},{c.bounds.Height}) " +
+                        $"neighbors L={c.leftNeighborID} R={c.rightNeighborID} U={c.upNeighborID} D={c.downNeighborID} " +
+                        $"visible={c.visible} type={c.GetType().Name}", LogLevel.Debug);
+                }
+            }
+            else
+            {
+                Monitor.Log("allClickableComponents is NULL", LogLevel.Debug);
+            }
+
+            // Also dump any named component collections via reflection
+            var bundleFields = new[] { "bundles", "bundleButtons", "areaNextButton", "areaBackButton", "backButton" };
+            foreach (var fieldName in bundleFields)
+            {
+                var field = AccessTools.Field(typeof(JunimoNoteMenu), fieldName);
+                if (field == null) continue;
+                var val = field.GetValue(menu);
+                if (val is ClickableComponent cc)
+                {
+                    Monitor.Log($"  Field '{fieldName}': {FormatComponent(cc)}", LogLevel.Debug);
+                }
+                else if (val is System.Collections.IList list)
+                {
+                    Monitor.Log($"  Field '{fieldName}': list count={list.Count}", LogLevel.Debug);
+                    for (int i = 0; i < list.Count; i++)
+                    {
+                        if (list[i] is ClickableComponent item)
+                            Monitor.Log($"    [{i}] {FormatComponent(item)}", LogLevel.Debug);
+                    }
+                }
+                else if (val != null)
+                {
+                    Monitor.Log($"  Field '{fieldName}': {val.GetType().Name} = {val}", LogLevel.Debug);
+                }
+                else
+                {
+                    Monitor.Log($"  Field '{fieldName}': null", LogLevel.Debug);
+                }
+            }
+
+            Monitor.Log("========== END OVERVIEW DUMP ==========", LogLevel.Debug);
+        }
+
+        private static string FormatComponent(ClickableComponent c)
+        {
+            if (c == null) return "null";
+            return $"id={c.myID} name='{c.name}' label='{c.label}' " +
+                $"bounds=({c.bounds.X},{c.bounds.Y},{c.bounds.Width},{c.bounds.Height}) " +
+                $"neighbors L={c.leftNeighborID} R={c.rightNeighborID} U={c.upNeighborID} D={c.downNeighborID}";
         }
 
         // ===== Reflection accessors =====
