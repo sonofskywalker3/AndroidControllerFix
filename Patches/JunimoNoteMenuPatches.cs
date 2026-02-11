@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Input;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
@@ -10,243 +11,330 @@ using StardewValley.Menus;
 namespace AndroidConsolizer.Patches
 {
     /// <summary>
-    /// Diagnostic patches for JunimoNoteMenu (Community Center bundles).
-    /// Logs component layout, navigation wiring, and A-press behavior.
+    /// Patches for JunimoNoteMenu (Community Center bundles).
+    /// Fixes controller navigation on the bundle donation page where Android's
+    /// currentlySnappedComponent stays null and A-press clicks go to wrong coordinates.
+    /// We manage our own cursor and generate correct click coordinates.
     /// </summary>
     internal static class JunimoNoteMenuPatches
     {
         private static IMonitor Monitor;
-        private static bool _hasLoggedOverview = false;
-        private static bool _hasLoggedBundlePage = false;
+
+        // Cached reflection fields
+        private static FieldInfo _specificBundlePageField;
+        private static FieldInfo _ingredientSlotsField;
+        private static FieldInfo _ingredientListField;
+
+        // Our tracked cursor position on the bundle donation page
+        private static ClickableComponent _trackedComponent = null;
+        private static bool _onBundlePage = false;
+        private static bool _needsInit = false;
 
         public static void Apply(Harmony harmony, IMonitor monitor)
         {
             Monitor = monitor;
 
-            // Patch receiveGamePadButton to log all gamepad input
+            // Cache reflection
+            _specificBundlePageField = AccessTools.Field(typeof(JunimoNoteMenu), "specificBundlePage");
+            _ingredientSlotsField = AccessTools.Field(typeof(JunimoNoteMenu), "ingredientSlots");
+            _ingredientListField = AccessTools.Field(typeof(JunimoNoteMenu), "ingredientList");
+
             harmony.Patch(
                 original: AccessTools.Method(typeof(JunimoNoteMenu), nameof(JunimoNoteMenu.receiveGamePadButton)),
                 prefix: new HarmonyMethod(typeof(JunimoNoteMenuPatches), nameof(ReceiveGamePadButton_Prefix))
             );
 
-            // Patch receiveLeftClick to log click coordinates vs snapped component
             harmony.Patch(
                 original: AccessTools.Method(typeof(JunimoNoteMenu), nameof(JunimoNoteMenu.receiveLeftClick)),
                 prefix: new HarmonyMethod(typeof(JunimoNoteMenuPatches), nameof(ReceiveLeftClick_Prefix))
             );
 
-            // Patch update to log component layout once when bundle page opens
             harmony.Patch(
                 original: AccessTools.Method(typeof(JunimoNoteMenu), "update", new[] { typeof(GameTime) }),
                 postfix: new HarmonyMethod(typeof(JunimoNoteMenuPatches), nameof(Update_Postfix))
             );
 
-            Monitor.Log("JunimoNoteMenu diagnostic patches applied.", LogLevel.Trace);
+            Monitor.Log("JunimoNoteMenu patches applied.", LogLevel.Trace);
         }
 
-        /// <summary>Reset logging flag when menu changes.</summary>
         public static void OnMenuChanged()
         {
-            _hasLoggedOverview = false;
-            _hasLoggedBundlePage = false;
+            _trackedComponent = null;
+            _onBundlePage = false;
+            _needsInit = false;
         }
 
-        private static void ReceiveGamePadButton_Prefix(JunimoNoteMenu __instance, Microsoft.Xna.Framework.Input.Buttons b)
+        /// <summary>
+        /// On the bundle donation page, intercept all gamepad input.
+        /// We manage navigation ourselves and fire receiveLeftClick at correct coordinates.
+        /// </summary>
+        private static bool ReceiveGamePadButton_Prefix(JunimoNoteMenu __instance, Buttons b)
         {
             try
             {
-                var snapped = __instance.currentlySnappedComponent;
                 bool specificBundle = GetSpecificBundlePage(__instance);
+                if (!specificBundle)
+                    return true; // Overview page — let game handle it
 
-                var invSnapped = __instance.inventory?.currentlySnappedComponent;
-                Monitor.Log($"[JunimoNote DIAG] receiveGamePadButton: button={b}, specificBundlePage={specificBundle}, " +
-                    $"snapped={snapped?.myID.ToString() ?? "null"} '{snapped?.name ?? ""}' " +
-                    $"bounds={snapped?.bounds.ToString() ?? "N/A"}, " +
-                    $"inv.snapped={invSnapped?.myID.ToString() ?? "null"} '{invSnapped?.name ?? ""}'", LogLevel.Info);
-            }
-            catch (Exception ex)
-            {
-                Monitor.Log($"[JunimoNote DIAG] receiveGamePadButton error: {ex.Message}", LogLevel.Debug);
-            }
-        }
-
-        private static void ReceiveLeftClick_Prefix(JunimoNoteMenu __instance, int x, int y)
-        {
-            try
-            {
-                var snapped = __instance.currentlySnappedComponent;
-                bool specificBundle = GetSpecificBundlePage(__instance);
-
-                var invSnapped = __instance.inventory?.currentlySnappedComponent;
-                Monitor.Log($"[JunimoNote DIAG] receiveLeftClick: x={x}, y={y}, specificBundlePage={specificBundle}, " +
-                    $"snapped={snapped?.myID.ToString() ?? "null"} '{snapped?.name ?? ""}' " +
-                    $"bounds={snapped?.bounds.ToString() ?? "N/A"}, " +
-                    $"inv.snapped={invSnapped?.myID.ToString() ?? "null"} '{invSnapped?.name ?? ""}' " +
-                    $"inv.snapped.bounds={invSnapped?.bounds.ToString() ?? "N/A"}, " +
-                    $"mouseX={Game1.getMouseX()}, mouseY={Game1.getMouseY()}", LogLevel.Info);
-
-                // Log what component the click actually hits
-                if (__instance.allClickableComponents != null)
+                // On the bundle donation page, handle navigation ourselves
+                switch (b)
                 {
-                    foreach (var comp in __instance.allClickableComponents)
-                    {
-                        if (comp.containsPoint(x, y))
-                        {
-                            Monitor.Log($"[JunimoNote DIAG]   -> Click hits component: id={comp.myID} '{comp.name}' bounds={comp.bounds}", LogLevel.Info);
-                        }
-                    }
-                }
+                    case Buttons.LeftThumbstickLeft:
+                    case Buttons.DPadLeft:
+                        NavigateDirection(__instance, "left");
+                        return false;
 
-                // Also check ingredientSlots and ingredientList via reflection
-                var ingredientSlots = GetField<List<ClickableTextureComponent>>(__instance, "ingredientSlots");
-                if (ingredientSlots != null)
-                {
-                    for (int i = 0; i < ingredientSlots.Count; i++)
-                    {
-                        if (ingredientSlots[i].containsPoint(x, y))
-                        {
-                            Monitor.Log($"[JunimoNote DIAG]   -> Click hits ingredientSlot[{i}]: id={ingredientSlots[i].myID} bounds={ingredientSlots[i].bounds}", LogLevel.Info);
-                        }
-                    }
-                }
+                    case Buttons.LeftThumbstickRight:
+                    case Buttons.DPadRight:
+                        NavigateDirection(__instance, "right");
+                        return false;
 
-                var ingredientList = GetField<List<ClickableTextureComponent>>(__instance, "ingredientList");
-                if (ingredientList != null)
-                {
-                    for (int i = 0; i < ingredientList.Count; i++)
-                    {
-                        if (ingredientList[i].containsPoint(x, y))
-                        {
-                            Monitor.Log($"[JunimoNote DIAG]   -> Click hits ingredientList[{i}]: id={ingredientList[i].myID} " +
-                                $"item={ingredientList[i].item?.Name ?? "null"} bounds={ingredientList[i].bounds}", LogLevel.Info);
-                        }
-                    }
+                    case Buttons.LeftThumbstickUp:
+                    case Buttons.DPadUp:
+                        NavigateDirection(__instance, "up");
+                        return false;
+
+                    case Buttons.LeftThumbstickDown:
+                    case Buttons.DPadDown:
+                        NavigateDirection(__instance, "down");
+                        return false;
+
+                    case Buttons.A:
+                        HandleAButton(__instance);
+                        return false;
+
+                    case Buttons.B:
+                        // Let the game handle B (close bundle page / close menu)
+                        // But reset our tracking since we're leaving the bundle page
+                        _trackedComponent = null;
+                        _onBundlePage = false;
+                        return true;
                 }
             }
             catch (Exception ex)
             {
-                Monitor.Log($"[JunimoNote DIAG] receiveLeftClick error: {ex.Message}", LogLevel.Debug);
+                Monitor.Log($"[JunimoNote] receiveGamePadButton error: {ex.Message}", LogLevel.Debug);
             }
+
+            return true; // Other buttons pass through
         }
 
+        /// <summary>
+        /// On the bundle donation page, redirect A-triggered clicks to the tracked component.
+        /// Touch clicks (not from A button) pass through normally.
+        /// </summary>
+        private static bool ReceiveLeftClick_Prefix(JunimoNoteMenu __instance, ref int x, ref int y)
+        {
+            try
+            {
+                bool specificBundle = GetSpecificBundlePage(__instance);
+                if (!specificBundle || _trackedComponent == null)
+                    return true;
+
+                // Check if this click was triggered by our A-button handler
+                // (we set mouse position to tracked component center before calling)
+                // vs a genuine touch event. Touch events have different coordinates.
+                // We use a flag to distinguish.
+                if (_aButtonClick)
+                {
+                    _aButtonClick = false;
+                    // Coordinates already set correctly by HandleAButton — let it through
+                    return true;
+                }
+
+                // Touch/mouse click — let it through as-is
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Monitor.Log($"[JunimoNote] receiveLeftClick prefix error: {ex.Message}", LogLevel.Debug);
+            }
+            return true;
+        }
+        private static bool _aButtonClick = false;
+
+        /// <summary>
+        /// Detect when we enter/leave the bundle donation page and initialize cursor.
+        /// </summary>
         private static void Update_Postfix(JunimoNoteMenu __instance, GameTime time)
         {
             try
             {
                 bool specificBundle = GetSpecificBundlePage(__instance);
 
-                // Log overview page components once
-                if (!specificBundle && !_hasLoggedOverview)
+                if (specificBundle && !_onBundlePage)
                 {
-                    _hasLoggedOverview = true;
-                    _hasLoggedBundlePage = false; // Reset for next bundle page entry
-                    Monitor.Log("[JunimoNote DIAG] === OVERVIEW PAGE (bundle selection) ===", LogLevel.Info);
-                    LogAllComponents(__instance);
+                    // Just entered the bundle donation page — initialize cursor
+                    _onBundlePage = true;
+                    _needsInit = true;
+                }
+                else if (!specificBundle && _onBundlePage)
+                {
+                    // Left the bundle page
+                    _onBundlePage = false;
+                    _trackedComponent = null;
                 }
 
-                // Log bundle page components once
-                if (specificBundle && !_hasLoggedBundlePage)
+                // Defer init by one frame so allClickableComponents is fully populated
+                if (_needsInit && specificBundle)
                 {
-                    _hasLoggedBundlePage = true;
-                    _hasLoggedOverview = false; // Reset for when we go back to overview
-                    Monitor.Log("[JunimoNote DIAG] === SPECIFIC BUNDLE PAGE (ingredient donation) ===", LogLevel.Info);
-                    LogAllComponents(__instance);
+                    _needsInit = false;
+                    InitializeCursor(__instance);
+                }
+
+                // Keep the visual cursor at our tracked component
+                if (specificBundle && _trackedComponent != null)
+                {
+                    __instance.currentlySnappedComponent = _trackedComponent;
+                    __instance.snapCursorToCurrentSnappedComponent();
                 }
             }
             catch (Exception ex)
             {
-                Monitor.Log($"[JunimoNote DIAG] Update_Postfix error: {ex.Message}", LogLevel.Debug);
+                Monitor.Log($"[JunimoNote] Update_Postfix error: {ex.Message}", LogLevel.Debug);
             }
         }
 
-        private static void LogAllComponents(JunimoNoteMenu menu)
+        /// <summary>Initialize the cursor to the first inventory slot.</summary>
+        private static void InitializeCursor(JunimoNoteMenu menu)
         {
-            Monitor.Log("[JunimoNote DIAG] === BUNDLE PAGE COMPONENT DUMP ===", LogLevel.Info);
-
-            // Log allClickableComponents
-            if (menu.allClickableComponents != null)
+            // Start at inventory slot 0
+            if (menu.inventory?.inventory != null && menu.inventory.inventory.Count > 0)
             {
-                Monitor.Log($"[JunimoNote DIAG] allClickableComponents count: {menu.allClickableComponents.Count}", LogLevel.Info);
-                foreach (var comp in menu.allClickableComponents)
+                _trackedComponent = menu.inventory.inventory[0];
+                menu.currentlySnappedComponent = _trackedComponent;
+                menu.snapCursorToCurrentSnappedComponent();
+                Monitor.Log($"[JunimoNote] Initialized cursor to inv slot 0, bounds={_trackedComponent.bounds}", LogLevel.Debug);
+            }
+        }
+
+        /// <summary>Navigate in a direction using neighbor IDs.</summary>
+        private static void NavigateDirection(JunimoNoteMenu menu, string direction)
+        {
+            if (_trackedComponent == null)
+            {
+                InitializeCursor(menu);
+                return;
+            }
+
+            int neighborId;
+            switch (direction)
+            {
+                case "left":  neighborId = _trackedComponent.leftNeighborID; break;
+                case "right": neighborId = _trackedComponent.rightNeighborID; break;
+                case "up":    neighborId = _trackedComponent.upNeighborID; break;
+                case "down":  neighborId = _trackedComponent.downNeighborID; break;
+                default: return;
+            }
+
+            if (neighborId == -1 || neighborId == -500)
+                return; // No neighbor in that direction
+
+            ClickableComponent target = null;
+
+            if (neighborId == -99998)
+            {
+                // Auto-snap: find nearest component in the given direction
+                target = FindNearestInDirection(menu, _trackedComponent, direction);
+            }
+            else if (neighborId == -7777)
+            {
+                // Custom snap — skip (bundle icons use this, don't want to navigate to them)
+                return;
+            }
+            else
+            {
+                // Direct neighbor ID
+                target = menu.getComponentWithID(neighborId);
+            }
+
+            if (target != null && target != _trackedComponent)
+            {
+                _trackedComponent = target;
+                menu.currentlySnappedComponent = _trackedComponent;
+                menu.snapCursorToCurrentSnappedComponent();
+                Game1.playSound("shiny4");
+            }
+        }
+
+        /// <summary>Find the nearest component in a given direction from the current one.</summary>
+        private static ClickableComponent FindNearestInDirection(JunimoNoteMenu menu, ClickableComponent from, string direction)
+        {
+            if (menu.allClickableComponents == null) return null;
+
+            var fromCenter = from.bounds.Center;
+            ClickableComponent best = null;
+            float bestDist = float.MaxValue;
+
+            foreach (var comp in menu.allClickableComponents)
+            {
+                if (comp == from) continue;
+                if (comp.myID == -500) continue; // Skip back/nav buttons with broken IDs
+                if (comp.fullyImmutable) continue; // Skip bundle icons
+
+                var compCenter = comp.bounds.Center;
+                bool valid = false;
+
+                switch (direction)
                 {
-                    Monitor.Log($"[JunimoNote DIAG]   id={comp.myID} name='{comp.name}' bounds={comp.bounds} " +
-                        $"up={comp.upNeighborID} down={comp.downNeighborID} left={comp.leftNeighborID} right={comp.rightNeighborID} " +
-                        $"fullyImmutable={comp.fullyImmutable}", LogLevel.Info);
+                    case "right": valid = compCenter.X > fromCenter.X + 8; break;
+                    case "left":  valid = compCenter.X < fromCenter.X - 8; break;
+                    case "down":  valid = compCenter.Y > fromCenter.Y + 8; break;
+                    case "up":    valid = compCenter.Y < fromCenter.Y - 8; break;
+                }
+
+                if (!valid) continue;
+
+                float dx = compCenter.X - fromCenter.X;
+                float dy = compCenter.Y - fromCenter.Y;
+                float dist;
+
+                // Weight: heavily favor components aligned on the perpendicular axis
+                if (direction == "left" || direction == "right")
+                    dist = Math.Abs(dx) + Math.Abs(dy) * 3f;
+                else
+                    dist = Math.Abs(dy) + Math.Abs(dx) * 3f;
+
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    best = comp;
                 }
             }
 
-            // Log ingredientSlots
-            var ingredientSlots = GetField<List<ClickableTextureComponent>>(__instance: menu, "ingredientSlots");
-            if (ingredientSlots != null)
+            return best;
+        }
+
+        /// <summary>Handle A button on the bundle donation page.</summary>
+        private static void HandleAButton(JunimoNoteMenu menu)
+        {
+            if (_trackedComponent == null)
             {
-                Monitor.Log($"[JunimoNote DIAG] ingredientSlots count: {ingredientSlots.Count}", LogLevel.Info);
-                for (int i = 0; i < ingredientSlots.Count; i++)
-                {
-                    var s = ingredientSlots[i];
-                    Monitor.Log($"[JunimoNote DIAG]   slot[{i}]: id={s.myID} name='{s.name}' bounds={s.bounds} " +
-                        $"item={s.item?.Name ?? "null"} " +
-                        $"up={s.upNeighborID} down={s.downNeighborID} left={s.leftNeighborID} right={s.rightNeighborID}", LogLevel.Info);
-                }
+                InitializeCursor(menu);
+                return;
             }
 
-            // Log ingredientList
-            var ingredientList = GetField<List<ClickableTextureComponent>>(__instance: menu, "ingredientList");
-            if (ingredientList != null)
-            {
-                Monitor.Log($"[JunimoNote DIAG] ingredientList count: {ingredientList.Count}", LogLevel.Info);
-                for (int i = 0; i < ingredientList.Count; i++)
-                {
-                    var l = ingredientList[i];
-                    Monitor.Log($"[JunimoNote DIAG]   list[{i}]: id={l.myID} name='{l.name}' bounds={l.bounds} " +
-                        $"item={l.item?.Name ?? "null"} " +
-                        $"up={l.upNeighborID} down={l.downNeighborID} left={l.leftNeighborID} right={l.rightNeighborID}", LogLevel.Info);
-                }
-            }
+            // Fire receiveLeftClick at the tracked component's center
+            var center = _trackedComponent.bounds.Center;
 
-            // Log inventory if present
-            if (menu.inventory != null)
-            {
-                Monitor.Log($"[JunimoNote DIAG] inventory.inventory count: {menu.inventory.inventory?.Count ?? 0}", LogLevel.Info);
-                if (menu.inventory.inventory != null)
-                {
-                    for (int i = 0; i < Math.Min(menu.inventory.inventory.Count, 12); i++)
-                    {
-                        var inv = menu.inventory.inventory[i];
-                        Monitor.Log($"[JunimoNote DIAG]   inv[{i}]: id={inv.myID} bounds={inv.bounds} " +
-                            $"up={inv.upNeighborID} down={inv.downNeighborID} left={inv.leftNeighborID} right={inv.rightNeighborID}", LogLevel.Info);
-                    }
-                    if (menu.inventory.inventory.Count > 12)
-                        Monitor.Log($"[JunimoNote DIAG]   ... and {menu.inventory.inventory.Count - 12} more inventory slots", LogLevel.Info);
-                }
-            }
+            // Position the mouse at the target so the game's internal checks work
+            Game1.setMousePosition(center.X, center.Y);
 
-            // Log snapped component
-            var snapped = menu.currentlySnappedComponent;
-            Monitor.Log($"[JunimoNote DIAG] currentlySnappedComponent: id={snapped?.myID.ToString() ?? "null"} '{snapped?.name ?? ""}'", LogLevel.Info);
+            _aButtonClick = true;
+            menu.receiveLeftClick(center.X, center.Y, true);
 
-            Monitor.Log("[JunimoNote DIAG] === END COMPONENT DUMP ===", LogLevel.Info);
+            Monitor.Log($"[JunimoNote] A pressed -> receiveLeftClick({center.X}, {center.Y}) on component id={_trackedComponent.myID} '{_trackedComponent.name}'", LogLevel.Debug);
         }
 
         private static bool GetSpecificBundlePage(JunimoNoteMenu menu)
         {
             try
             {
-                var field = AccessTools.Field(typeof(JunimoNoteMenu), "specificBundlePage");
-                if (field != null)
-                    return (bool)field.GetValue(menu);
+                if (_specificBundlePageField != null)
+                    return (bool)_specificBundlePageField.GetValue(menu);
             }
             catch { }
             return false;
-        }
-
-        private static T GetField<T>(JunimoNoteMenu __instance, string fieldName) where T : class
-        {
-            try
-            {
-                var field = AccessTools.Field(typeof(JunimoNoteMenu), fieldName);
-                return field?.GetValue(__instance) as T;
-            }
-            catch { return null; }
         }
     }
 }
