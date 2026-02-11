@@ -538,15 +538,7 @@ namespace AndroidConsolizer.Patches
                     }
                 }
 
-                // Re-set drop zone tooltip EVERY tick (not just on change) because
-                // the game's performHoverAction runs every frame and clears hover text
-                // for our custom component that it doesn't know about.
-                if (snapped.myID == DropZoneId && IsHoldingItem)
-                {
-                    InvPage_HoverTextField?.SetValue(inventoryPage, "Drop Item");
-                    InvPage_HoverTitleField?.SetValue(inventoryPage, "");
-                    InvPage_HoveredItemField?.SetValue(inventoryPage, null);
-                }
+
             }
             catch (Exception ex)
             {
