@@ -100,8 +100,15 @@ namespace AndroidConsolizer.Patches
                         return false;
 
                     case Buttons.A:
-                        HandleAButton(__instance);
-                        return false;
+                        // Set mouse + snapped component, then let the game's A handler run
+                        if (_trackedComponent != null)
+                        {
+                            var center = _trackedComponent.bounds.Center;
+                            Game1.setMousePosition(center.X, center.Y);
+                            __instance.currentlySnappedComponent = _trackedComponent;
+                            Monitor.Log($"[JunimoNote] A: set mouse to ({center.X},{center.Y}) on id={_trackedComponent.myID} '{_trackedComponent.name}'", LogLevel.Debug);
+                        }
+                        return true; // Let game handle A with correct position
 
                     case Buttons.B:
                         // Let the game handle B (close bundle page / close menu)
@@ -120,38 +127,33 @@ namespace AndroidConsolizer.Patches
         }
 
         /// <summary>
-        /// On the bundle donation page, redirect A-triggered clicks to the tracked component.
-        /// Touch clicks (not from A button) pass through normally.
+        /// On the bundle donation page, redirect gamepad-triggered clicks to the tracked component.
+        /// Touch clicks pass through as-is.
         /// </summary>
-        private static bool ReceiveLeftClick_Prefix(JunimoNoteMenu __instance, ref int x, ref int y)
+        private static void ReceiveLeftClick_Prefix(JunimoNoteMenu __instance, ref int x, ref int y)
         {
             try
             {
                 bool specificBundle = GetSpecificBundlePage(__instance);
                 if (!specificBundle || _trackedComponent == null)
-                    return true;
+                    return;
 
-                // Check if this click was triggered by our A-button handler
-                // (we set mouse position to tracked component center before calling)
-                // vs a genuine touch event. Touch events have different coordinates.
-                // We use a flag to distinguish.
-                if (_aButtonClick)
+                // If mouse position is far from any inventory/ingredient component,
+                // it's likely a gamepad-triggered click at stale coordinates.
+                // Redirect to our tracked component.
+                var center = _trackedComponent.bounds.Center;
+                if (Math.Abs(x - center.X) > 200 || Math.Abs(y - center.Y) > 200)
                 {
-                    _aButtonClick = false;
-                    // Coordinates already set correctly by HandleAButton — let it through
-                    return true;
+                    Monitor.Log($"[JunimoNote] Redirecting click from ({x},{y}) to tracked ({center.X},{center.Y}) id={_trackedComponent.myID}", LogLevel.Debug);
+                    x = center.X;
+                    y = center.Y;
                 }
-
-                // Touch/mouse click — let it through as-is
-                return true;
             }
             catch (Exception ex)
             {
                 Monitor.Log($"[JunimoNote] receiveLeftClick prefix error: {ex.Message}", LogLevel.Debug);
             }
-            return true;
         }
-        private static bool _aButtonClick = false;
 
         /// <summary>
         /// Detect when we enter/leave the bundle donation page and initialize cursor.
@@ -186,7 +188,11 @@ namespace AndroidConsolizer.Patches
                 if (specificBundle && _trackedComponent != null)
                 {
                     __instance.currentlySnappedComponent = _trackedComponent;
+                    var center = _trackedComponent.bounds.Center;
+                    Game1.setMousePosition(center.X, center.Y);
                     __instance.snapCursorToCurrentSnappedComponent();
+                    // Drive hover highlight so the game renders the selection box
+                    __instance.performHoverAction(center.X, center.Y);
                 }
             }
             catch (Exception ex)
@@ -303,27 +309,6 @@ namespace AndroidConsolizer.Patches
             }
 
             return best;
-        }
-
-        /// <summary>Handle A button on the bundle donation page.</summary>
-        private static void HandleAButton(JunimoNoteMenu menu)
-        {
-            if (_trackedComponent == null)
-            {
-                InitializeCursor(menu);
-                return;
-            }
-
-            // Fire receiveLeftClick at the tracked component's center
-            var center = _trackedComponent.bounds.Center;
-
-            // Position the mouse at the target so the game's internal checks work
-            Game1.setMousePosition(center.X, center.Y);
-
-            _aButtonClick = true;
-            menu.receiveLeftClick(center.X, center.Y, true);
-
-            Monitor.Log($"[JunimoNote] A pressed -> receiveLeftClick({center.X}, {center.Y}) on component id={_trackedComponent.myID} '{_trackedComponent.name}'", LogLevel.Debug);
         }
 
         private static bool GetSpecificBundlePage(JunimoNoteMenu menu)
