@@ -872,6 +872,21 @@ namespace AndroidConsolizer.Patches
         /// <summary>Postfix for update — Y-button hold-to-repeat for single-item transfer.</summary>
         private static void Update_Postfix(ItemGrabMenu __instance, GameTime time)
         {
+            // Self-healing: if touch rebuilt allClickableComponents, our custom IDs are gone
+            if (ModEntry.Config.EnableConsoleChests && !__instance.shippingBin)
+            {
+                bool hasSortChest = false;
+                foreach (var comp in __instance.allClickableComponents)
+                {
+                    if (comp.myID == ID_SORT_CHEST) { hasSortChest = true; break; }
+                }
+                if (!hasSortChest)
+                {
+                    Monitor?.Log("[ItemGrabMenu] Custom IDs missing — re-running FixSnapNavigation", LogLevel.Debug);
+                    FixSnapNavigation(__instance);
+                }
+            }
+
             if (!_yTransferHeld || !ModEntry.Config.EnableConsoleChests)
                 return;
 
