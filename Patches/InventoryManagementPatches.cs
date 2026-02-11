@@ -523,18 +523,8 @@ namespace AndroidConsolizer.Patches
                     // Call performHoverAction to trigger tooltip display
                     inventoryPage.performHoverAction(hoverX, hoverY);
 
-                    // Set tooltip for drop zone (only when holding an item)
-                    if (snapped.myID == DropZoneId)
-                    {
-                        if (IsHoldingItem)
-                        {
-                            InvPage_HoverTextField?.SetValue(inventoryPage, "Drop Item");
-                            InvPage_HoverTitleField?.SetValue(inventoryPage, "");
-                            InvPage_HoveredItemField?.SetValue(inventoryPage, null);
-                        }
-                    }
                     // Also try to directly set hoveredItem for inventory slots
-                    else if (snapped.myID >= 0 && snapped.myID < Game1.player.Items.Count)
+                    if (snapped.myID >= 0 && snapped.myID < Game1.player.Items.Count)
                     {
                         Item item = Game1.player.Items[snapped.myID];
                         if (item != null && inventoryPage.inventory != null)
@@ -546,6 +536,16 @@ namespace AndroidConsolizer.Patches
                             InvPage_HoveredItemField?.SetValue(inventoryPage, item);
                         }
                     }
+                }
+
+                // Re-set drop zone tooltip EVERY tick (not just on change) because
+                // the game's performHoverAction runs every frame and clears hover text
+                // for our custom component that it doesn't know about.
+                if (snapped.myID == DropZoneId && IsHoldingItem)
+                {
+                    InvPage_HoverTextField?.SetValue(inventoryPage, "Drop Item");
+                    InvPage_HoverTitleField?.SetValue(inventoryPage, "");
+                    InvPage_HoveredItemField?.SetValue(inventoryPage, null);
                 }
             }
             catch (Exception ex)
