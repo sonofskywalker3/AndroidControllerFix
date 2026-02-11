@@ -289,7 +289,34 @@ namespace AndroidConsolizer.Patches
 
         private static void Draw_Postfix(JunimoNoteMenu __instance, SpriteBatch b)
         {
-            _overridingMouse = false;
+            try
+            {
+                // Draw our own cursor — Android suppresses the game's drawMouse on this page.
+                // Use tile 44 (snappy/controller cursor) at bounds.Center for consistency
+                // with how snapCursorToCurrentSnappedComponent positions the cursor.
+                if (_onDonationPage && __instance.inventory?.inventory != null
+                    && _trackedSlotIndex < __instance.inventory.inventory.Count)
+                {
+                    var slot = __instance.inventory.inventory[_trackedSlotIndex];
+                    int cursorTile = Game1.options.snappyMenus ? 44 : Game1.mouseCursor;
+                    b.Draw(
+                        Game1.mouseCursors,
+                        new Vector2(slot.bounds.Center.X, slot.bounds.Center.Y),
+                        Game1.getSourceRectForStandardTileSheet(Game1.mouseCursors, cursorTile, 16, 16),
+                        Color.White,
+                        0f,
+                        Vector2.Zero,
+                        4f + Game1.dialogueButtonScale / 150f,
+                        SpriteEffects.None,
+                        1f
+                    );
+                }
+            }
+            catch { }
+            finally
+            {
+                _overridingMouse = false;
+            }
         }
 
         // ===== Reflection accessors =====
