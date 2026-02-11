@@ -58,9 +58,11 @@ namespace AndroidConsolizer.Patches
                 var snapped = __instance.currentlySnappedComponent;
                 bool specificBundle = GetSpecificBundlePage(__instance);
 
+                var invSnapped = __instance.inventory?.currentlySnappedComponent;
                 Monitor.Log($"[JunimoNote DIAG] receiveGamePadButton: button={b}, specificBundlePage={specificBundle}, " +
                     $"snapped={snapped?.myID.ToString() ?? "null"} '{snapped?.name ?? ""}' " +
-                    $"bounds={snapped?.bounds.ToString() ?? "N/A"}", LogLevel.Info);
+                    $"bounds={snapped?.bounds.ToString() ?? "N/A"}, " +
+                    $"inv.snapped={invSnapped?.myID.ToString() ?? "null"} '{invSnapped?.name ?? ""}'", LogLevel.Info);
             }
             catch (Exception ex)
             {
@@ -75,9 +77,12 @@ namespace AndroidConsolizer.Patches
                 var snapped = __instance.currentlySnappedComponent;
                 bool specificBundle = GetSpecificBundlePage(__instance);
 
+                var invSnapped = __instance.inventory?.currentlySnappedComponent;
                 Monitor.Log($"[JunimoNote DIAG] receiveLeftClick: x={x}, y={y}, specificBundlePage={specificBundle}, " +
                     $"snapped={snapped?.myID.ToString() ?? "null"} '{snapped?.name ?? ""}' " +
                     $"bounds={snapped?.bounds.ToString() ?? "N/A"}, " +
+                    $"inv.snapped={invSnapped?.myID.ToString() ?? "null"} '{invSnapped?.name ?? ""}' " +
+                    $"inv.snapped.bounds={invSnapped?.bounds.ToString() ?? "N/A"}, " +
                     $"mouseX={Game1.getMouseX()}, mouseY={Game1.getMouseY()}", LogLevel.Info);
 
                 // Log what component the click actually hits
