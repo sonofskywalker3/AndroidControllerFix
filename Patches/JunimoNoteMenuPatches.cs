@@ -159,16 +159,33 @@ namespace AndroidConsolizer.Patches
             {
                 if (!GetSpecificBundlePage(__instance))
                 {
-                    // Overview page — intercept A for GetMouseState override, let game handle nav
-                    if (_onOverviewPage && b == Buttons.A)
+                    if (!_onOverviewPage) return true;
+
+                    // Overview page — handle all navigation + A ourselves
+                    switch (b)
                     {
-                        HandleOverviewAPress(__instance);
-                        return false;
+                        case Buttons.LeftThumbstickRight:
+                        case Buttons.DPadRight:
+                            NavigateOverview(__instance, "right");
+                            return false;
+                        case Buttons.LeftThumbstickLeft:
+                        case Buttons.DPadLeft:
+                            NavigateOverview(__instance, "left");
+                            return false;
+                        case Buttons.LeftThumbstickDown:
+                        case Buttons.DPadDown:
+                            NavigateOverview(__instance, "down");
+                            return false;
+                        case Buttons.LeftThumbstickUp:
+                        case Buttons.DPadUp:
+                            NavigateOverview(__instance, "up");
+                            return false;
+                        case Buttons.A:
+                            HandleOverviewAPress(__instance);
+                            return false;
+                        default:
+                            return true; // B closes menu, etc.
                     }
-                    // DIAGNOSTIC: Log overview page navigation before game handles it
-                    var snapped = __instance.currentlySnappedComponent;
-                    Monitor.Log($"[JunimoNote:Overview] BEFORE button={b} snapped={FormatComponent(snapped)}", LogLevel.Debug);
-                    return true; // let game handle navigation (data is now fixed)
                 }
 
                 switch (b)
@@ -534,6 +551,35 @@ namespace AndroidConsolizer.Patches
                 c.leftNeighborID = bestLeftId;
                 c.downNeighborID = bestDownId;
                 c.upNeighborID = bestUpId;
+            }
+        }
+
+        private static void NavigateOverview(JunimoNoteMenu menu, string direction)
+        {
+            var current = menu.currentlySnappedComponent;
+            if (current == null || menu.allClickableComponents == null) return;
+
+            int targetId;
+            switch (direction)
+            {
+                case "right": targetId = current.rightNeighborID; break;
+                case "left":  targetId = current.leftNeighborID; break;
+                case "down":  targetId = current.downNeighborID; break;
+                case "up":    targetId = current.upNeighborID; break;
+                default: return;
+            }
+
+            if (targetId < 0) return; // no neighbor in that direction
+
+            foreach (var c in menu.allClickableComponents)
+            {
+                if (c.myID == targetId)
+                {
+                    menu.currentlySnappedComponent = c;
+                    menu.snapCursorToCurrentSnappedComponent();
+                    Monitor.Log($"[JunimoNote:Overview] Nav {direction}: {FormatComponent(c)}", LogLevel.Debug);
+                    return;
+                }
             }
         }
 
