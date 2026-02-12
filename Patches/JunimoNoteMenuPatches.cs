@@ -12,10 +12,11 @@ using StardewValley.Menus;
 namespace AndroidConsolizer.Patches
 {
     /// <summary>
-    /// Controller support for the Community Center bundle donation page.
-    /// Manages a tracked cursor over inventory slots. On A press, overrides
-    /// GetMouseState so receiveLeftClick reads the tracked position (Android's
-    /// receiveLeftClick ignores its x,y params and reads GetMouseState internally).
+    /// Controller support for the Community Center JunimoNoteMenu.
+    /// Overview page: populates allClickableComponents from bundles, wires spatial neighbors.
+    /// Donation page: manages a tracked cursor over inventory slots and ingredient list.
+    /// On A press, overrides GetMouseState so receiveLeftClick reads the tracked position
+    /// (Android's receiveLeftClick ignores its x,y params and reads GetMouseState internally).
     /// </summary>
     internal static class JunimoNoteMenuPatches
     {
@@ -23,8 +24,6 @@ namespace AndroidConsolizer.Patches
 
         // Cached reflection
         private static FieldInfo _specificBundlePageField;
-        private static FieldInfo _heldItemField;
-        private static FieldInfo _ingredientSlotsField;
         private static FieldInfo _ingredientListField;
         private static FieldInfo _bundlesField;
 
@@ -51,17 +50,12 @@ namespace AndroidConsolizer.Patches
         private static int _enteredPageTick = -100;
         private static bool _weInitiatedClick;
 
-        // Diagnostic: overview page component dump (one-time per page entry)
-        private static bool _dumpedOverviewComponents;
-
         public static void Apply(Harmony harmony, IMonitor monitor)
         {
             Monitor = monitor;
 
             // Cache reflection
             _specificBundlePageField = AccessTools.Field(typeof(JunimoNoteMenu), "specificBundlePage");
-            _heldItemField = AccessTools.Field(typeof(JunimoNoteMenu), "heldItem");
-            _ingredientSlotsField = AccessTools.Field(typeof(JunimoNoteMenu), "ingredientSlots");
             _ingredientListField = AccessTools.Field(typeof(JunimoNoteMenu), "ingredientList");
             _bundlesField = AccessTools.Field(typeof(JunimoNoteMenu), "bundles");
 
@@ -94,8 +88,7 @@ namespace AndroidConsolizer.Patches
             // receiveGamePadButton — handle navigation and A press
             harmony.Patch(
                 original: AccessTools.Method(typeof(JunimoNoteMenu), nameof(JunimoNoteMenu.receiveGamePadButton)),
-                prefix: new HarmonyMethod(typeof(JunimoNoteMenuPatches), nameof(ReceiveGamePadButton_Prefix)),
-                postfix: new HarmonyMethod(typeof(JunimoNoteMenuPatches), nameof(ReceiveGamePadButton_Postfix))
+                prefix: new HarmonyMethod(typeof(JunimoNoteMenuPatches), nameof(ReceiveGamePadButton_Prefix))
             );
 
             // update — detect page transitions, keep cursor in sync
@@ -104,8 +97,7 @@ namespace AndroidConsolizer.Patches
                 postfix: new HarmonyMethod(typeof(JunimoNoteMenuPatches), nameof(Update_Postfix))
             );
 
-            // draw — override GetMouseState during draw so game's own drawMouse renders
-            // its native cursor at the tracked slot position (consistent with inventory/chest)
+            // draw — override GetMouseState during draw for cursor + tooltip rendering
             harmony.Patch(
                 original: AccessTools.Method(typeof(JunimoNoteMenu), "draw", new[] { typeof(SpriteBatch) }),
                 prefix: new HarmonyMethod(typeof(JunimoNoteMenuPatches), nameof(Draw_Prefix)),
@@ -120,7 +112,6 @@ namespace AndroidConsolizer.Patches
             _onDonationPage = false;
             _onOverviewPage = false;
             _overridingMouse = false;
-            _dumpedOverviewComponents = false;
             _inIngredientZone = false;
             _ingredientRows = null;
         }
@@ -139,24 +130,16 @@ namespace AndroidConsolizer.Patches
         }
 
         // ===== receiveLeftClick prefix — block stale touch-sim clicks =====
-        // When A opens the donation page, Android fires a touch-sim receiveLeftClick.
-        // Our SnapToSlot moved the mouse to slot 0's center, so the stale click would
-        // interact with slot 0 (causing item swaps/flicker). Block clicks for a few
-        // ticks after page entry unless we initiated them via HandleAPress.
 
         private static bool ReceiveLeftClick_Prefix(JunimoNoteMenu __instance, int x, int y)
         {
             if (!_onDonationPage) return true;
-            if (_weInitiatedClick) return true; // our A-press click — allow
+            if (_weInitiatedClick) return true;
 
-            // Block clicks within 3 ticks of page entry
             if (Game1.ticks - _enteredPageTick <= 3)
-            {
-                Monitor.Log($"[JunimoNote] Blocked stale click ({x},{y}) {Game1.ticks - _enteredPageTick} ticks after entry", LogLevel.Debug);
                 return false;
-            }
 
-            return true; // normal touch clicks after cooldown — allow
+            return true;
         }
 
         // ===== receiveGamePadButton prefix =====
@@ -169,7 +152,6 @@ namespace AndroidConsolizer.Patches
                 {
                     if (!_onOverviewPage) return true;
 
-                    // Overview page — handle all navigation + A ourselves
                     switch (b)
                     {
                         case Buttons.LeftThumbstickRight:
@@ -192,7 +174,7 @@ namespace AndroidConsolizer.Patches
                             HandleOverviewAPress(__instance);
                             return false;
                         default:
-                            return true; // B closes menu, etc.
+                            return true;
                     }
                 }
 
@@ -220,10 +202,10 @@ namespace AndroidConsolizer.Patches
 
                     case Buttons.A:
                         HandleAPress(__instance);
-                        return false; // we call receiveLeftClick ourselves
+                        return false;
 
                     default:
-                        return true; // B closes menu, etc.
+                        return true;
                 }
             }
             catch (Exception ex)
@@ -233,21 +215,7 @@ namespace AndroidConsolizer.Patches
             }
         }
 
-        // ===== receiveGamePadButton postfix (diagnostic) =====
-
-        private static void ReceiveGamePadButton_Postfix(JunimoNoteMenu __instance, Buttons b)
-        {
-            try
-            {
-                if (GetSpecificBundlePage(__instance)) return; // donation page handled by prefix
-
-                var snapped = __instance.currentlySnappedComponent;
-                Monitor.Log($"[JunimoNote:Overview] AFTER  button={b} snapped={FormatComponent(snapped)}", LogLevel.Debug);
-            }
-            catch { }
-        }
-
-        // ===== Navigation =====
+        // ===== Inventory navigation =====
 
         private static void Navigate(JunimoNoteMenu menu, int dx, int dy)
         {
@@ -302,7 +270,6 @@ namespace AndroidConsolizer.Patches
             var ingredientList = GetIngredientList(menu);
             if (ingredientList == null || ingredientList.Count == 0) return;
 
-            // Group by Y coordinate, sorted ascending
             var yGroups = new SortedDictionary<int, List<int>>();
             for (int i = 0; i < ingredientList.Count; i++)
             {
@@ -312,14 +279,11 @@ namespace AndroidConsolizer.Patches
                 yGroups[y].Add(i);
             }
 
-            // Sort each row by X coordinate
             foreach (var group in yGroups.Values)
             {
                 group.Sort((a, b) => ingredientList[a].bounds.X.CompareTo(ingredientList[b].bounds.X));
                 _ingredientRows.Add(group);
             }
-
-            Monitor.Log($"[JunimoNote] Built ingredient rows: {_ingredientRows.Count} rows, counts={string.Join(",", _ingredientRows.ConvertAll(r => r.Count.ToString()))}", LogLevel.Debug);
         }
 
         private static void EnterIngredientZone(JunimoNoteMenu menu, int fromInvRow)
@@ -352,10 +316,8 @@ namespace AndroidConsolizer.Patches
                 }
             }
 
-            // Snap to leftmost ingredient in that row
             _trackedIngredientIndex = _ingredientRows[bestRow][0];
             SnapToIngredient(menu);
-            Monitor.Log($"[JunimoNote] Entered ingredient zone: row={bestRow} index={_trackedIngredientIndex} ('{ingredientList[_trackedIngredientIndex].hoverText}')", LogLevel.Debug);
         }
 
         private static void ExitIngredientZone(JunimoNoteMenu menu)
@@ -364,17 +326,15 @@ namespace AndroidConsolizer.Patches
             int targetRow = _lastInventoryRow;
             int maxRow = _maxSlotIndex / INV_COLUMNS;
             targetRow = Math.Min(targetRow, maxRow);
-            _trackedSlotIndex = targetRow * INV_COLUMNS + (INV_COLUMNS - 1); // rightmost column
+            _trackedSlotIndex = targetRow * INV_COLUMNS + (INV_COLUMNS - 1);
             _trackedSlotIndex = Math.Min(_trackedSlotIndex, _maxSlotIndex);
             SnapToSlot(menu);
-            Monitor.Log($"[JunimoNote] Exited ingredient zone → inventory slot {_trackedSlotIndex}", LogLevel.Debug);
         }
 
         private static void NavigateIngredientZone(JunimoNoteMenu menu, int dx, int dy)
         {
             if (_ingredientRows == null || _ingredientRows.Count == 0) return;
 
-            // Find current row and position within row
             int curRow = -1, curPosInRow = -1;
             for (int r = 0; r < _ingredientRows.Count; r++)
             {
@@ -393,20 +353,18 @@ namespace AndroidConsolizer.Patches
                 int newPos = curPosInRow + dx;
                 if (newPos < 0)
                 {
-                    // Left past leftmost → return to inventory
                     ExitIngredientZone(menu);
                     return;
                 }
                 if (newPos >= _ingredientRows[curRow].Count)
-                    return; // right past rightmost → clamp
+                    return;
                 _trackedIngredientIndex = _ingredientRows[curRow][newPos];
             }
             else if (dy != 0)
             {
                 int newRow = curRow + dy;
                 if (newRow < 0 || newRow >= _ingredientRows.Count)
-                    return; // can't go further
-                // Keep same position in row, clamped
+                    return;
                 int newPos = Math.Min(curPosInRow, _ingredientRows[newRow].Count - 1);
                 _trackedIngredientIndex = _ingredientRows[newRow][newPos];
             }
@@ -437,15 +395,10 @@ namespace AndroidConsolizer.Patches
             var slot = menu.inventory.inventory[_trackedSlotIndex];
             var center = slot.bounds.Center;
 
-            // Set one-shot GetMouseState override so receiveLeftClick reads our position
             float zoom = Game1.options.zoomLevel;
             _overrideRawX = (int)(center.X * zoom);
             _overrideRawY = (int)(center.Y * zoom);
             _overridingMouse = true;
-
-            var heldBefore = GetHeldItem(menu);
-            Item invItem = (_trackedSlotIndex < Game1.player.Items.Count) ? Game1.player.Items[_trackedSlotIndex] : null;
-            Monitor.Log($"[JunimoNote] A on slot {_trackedSlotIndex} ({invItem?.DisplayName ?? "empty"}): click ({center.X},{center.Y}) raw=({_overrideRawX},{_overrideRawY}) held={heldBefore?.DisplayName ?? "null"}", LogLevel.Debug);
 
             _weInitiatedClick = true;
             try
@@ -457,9 +410,6 @@ namespace AndroidConsolizer.Patches
                 _weInitiatedClick = false;
                 _overridingMouse = false;
             }
-
-            var heldAfter = GetHeldItem(menu);
-            Monitor.Log($"[JunimoNote] After A: held={heldAfter?.DisplayName ?? "null"} cursor={Game1.player.CursorSlotItem?.DisplayName ?? "null"} onPage={GetSpecificBundlePage(menu)}", LogLevel.Debug);
         }
 
         private static void HandleIngredientAPress(JunimoNoteMenu menu)
@@ -474,8 +424,6 @@ namespace AndroidConsolizer.Patches
             _overrideRawX = (int)(center.X * zoom);
             _overrideRawY = (int)(center.Y * zoom);
             _overridingMouse = true;
-
-            Monitor.Log($"[JunimoNote] A on ingredient {_trackedIngredientIndex} ('{comp.hoverText}'): click ({center.X},{center.Y})", LogLevel.Debug);
 
             _weInitiatedClick = true;
             try
@@ -497,13 +445,6 @@ namespace AndroidConsolizer.Patches
             {
                 bool specificBundle = GetSpecificBundlePage(__instance);
 
-                // DIAGNOSTIC: One-time dump of overview page components
-                if (!specificBundle && !_dumpedOverviewComponents)
-                {
-                    _dumpedOverviewComponents = true;
-                    DumpOverviewComponents(__instance);
-                }
-
                 // Overview page entry — populate allClickableComponents and wire neighbors
                 if (!specificBundle && !_onOverviewPage)
                 {
@@ -522,21 +463,17 @@ namespace AndroidConsolizer.Patches
                 if (specificBundle && !_onDonationPage)
                 {
                     _onDonationPage = true;
-                    _onOverviewPage = false; // will re-init on return
+                    _onOverviewPage = false;
                     _trackedSlotIndex = 0;
                     _inIngredientZone = false;
                     _enteredPageTick = Game1.ticks;
 
-                    // Determine max slot index based on player's actual inventory size
                     int invCount = Game1.player.Items.Count;
                     int slotCount = __instance.inventory?.inventory?.Count ?? 36;
                     _maxSlotIndex = Math.Min(invCount, slotCount) - 1;
                     if (_maxSlotIndex < 0) _maxSlotIndex = 0;
 
                     BuildIngredientRows(__instance);
-
-                    Monitor.Log($"[JunimoNote] Entered donation page, maxSlot={_maxSlotIndex}", LogLevel.Debug);
-                    DumpDonationPageComponents(__instance);
                     SnapToSlot(__instance);
                 }
                 else if (!specificBundle && _onDonationPage)
@@ -545,8 +482,6 @@ namespace AndroidConsolizer.Patches
                     _overridingMouse = false;
                     _inIngredientZone = false;
                     _ingredientRows = null;
-                    _dumpedOverviewComponents = false; // re-dump when returning to overview
-                    Monitor.Log("[JunimoNote] Left donation page", LogLevel.Debug);
                 }
 
                 // Keep currentlySnappedComponent in sync (game may reset it)
@@ -571,11 +506,7 @@ namespace AndroidConsolizer.Patches
             }
         }
 
-        // ===== Draw prefix/postfix — override GetMouseState during draw =====
-        // The game's draw method calls drawMouse(b) which reads getMouseX/Y.
-        // By overriding GetMouseState during draw, the game renders its native cursor
-        // (same sprite as inventory/chest) at the tracked slot's center position.
-        // Touch is unaffected: override is only active during the draw phase.
+        // ===== Draw prefix/postfix =====
 
         private static void Draw_Prefix(JunimoNoteMenu __instance)
         {
@@ -616,7 +547,6 @@ namespace AndroidConsolizer.Patches
         {
             try
             {
-                // Draw our own cursor — Android suppresses the game's drawMouse on this page.
                 ClickableComponent target = null;
 
                 if (_onDonationPage)
@@ -690,7 +620,6 @@ namespace AndroidConsolizer.Patches
                     components.Add(cc);
             }
 
-            // Add back button with a unique ID for navigation
             var backButtonField = AccessTools.Field(typeof(JunimoNoteMenu), "backButton");
             var backButton = backButtonField?.GetValue(menu) as ClickableComponent;
             if (backButton != null)
@@ -699,7 +628,6 @@ namespace AndroidConsolizer.Patches
                 components.Add(backButton);
             }
 
-            // Add area next/back buttons if they exist (room switching)
             var areaNext = AccessTools.Field(typeof(JunimoNoteMenu), "areaNextButton")?.GetValue(menu) as ClickableComponent;
             if (areaNext != null)
             {
@@ -716,15 +644,8 @@ namespace AndroidConsolizer.Patches
             menu.allClickableComponents = components;
             WireNeighborsByPosition(components);
 
-            // Set initial snapped component to first bundle
             menu.currentlySnappedComponent = components[0];
             menu.snapCursorToCurrentSnappedComponent();
-
-            Monitor.Log($"[JunimoNote:Overview] Initialized navigation: {components.Count} components", LogLevel.Debug);
-            foreach (var c in components)
-            {
-                Monitor.Log($"  {FormatComponent(c)}", LogLevel.Debug);
-            }
 
             return true;
         }
@@ -751,26 +672,21 @@ namespace AndroidConsolizer.Patches
                     int adx = Math.Abs(dx);
                     int ady = Math.Abs(dy);
 
-                    // Right: must be to the right, and not nearly perpendicular
-                    // Angle filter: require adx > ady/4 (~76 degree cone)
                     if (dx > 0 && adx > ady / 4)
                     {
                         int score = dx + ady * 2;
                         if (score < bestRightScore) { bestRightScore = score; bestRightId = other.myID; }
                     }
-                    // Left
                     if (dx < 0 && adx > ady / 4)
                     {
                         int score = adx + ady * 2;
                         if (score < bestLeftScore) { bestLeftScore = score; bestLeftId = other.myID; }
                     }
-                    // Down
                     if (dy > 0 && ady > adx / 4)
                     {
                         int score = dy + adx * 2;
                         if (score < bestDownScore) { bestDownScore = score; bestDownId = other.myID; }
                     }
-                    // Up
                     if (dy < 0 && ady > adx / 4)
                     {
                         int score = ady + adx * 2;
@@ -800,7 +716,7 @@ namespace AndroidConsolizer.Patches
                 default: return;
             }
 
-            if (targetId < 0) return; // no neighbor in that direction
+            if (targetId < 0) return;
 
             foreach (var c in menu.allClickableComponents)
             {
@@ -808,7 +724,6 @@ namespace AndroidConsolizer.Patches
                 {
                     menu.currentlySnappedComponent = c;
                     menu.snapCursorToCurrentSnappedComponent();
-                    Monitor.Log($"[JunimoNote:Overview] Nav {direction}: {FormatComponent(c)}", LogLevel.Debug);
                     return;
                 }
             }
@@ -825,8 +740,6 @@ namespace AndroidConsolizer.Patches
             _overrideRawY = (int)(center.Y * zoom);
             _overridingMouse = true;
 
-            Monitor.Log($"[JunimoNote:Overview] A press on {FormatComponent(snapped)}, click ({center.X},{center.Y})", LogLevel.Debug);
-
             try
             {
                 menu.receiveLeftClick(center.X, center.Y);
@@ -837,157 +750,12 @@ namespace AndroidConsolizer.Patches
             }
         }
 
-        // ===== Diagnostic helpers =====
-
-        private static void DumpOverviewComponents(JunimoNoteMenu menu)
-        {
-            Monitor.Log("========== JUNIMO NOTE OVERVIEW: COMPONENT DUMP ==========", LogLevel.Debug);
-            Monitor.Log($"Menu position: ({menu.xPositionOnScreen},{menu.yPositionOnScreen}) size {menu.width}x{menu.height}", LogLevel.Debug);
-            Monitor.Log($"currentlySnappedComponent: {FormatComponent(menu.currentlySnappedComponent)}", LogLevel.Debug);
-
-            if (menu.allClickableComponents != null)
-            {
-                Monitor.Log($"allClickableComponents count: {menu.allClickableComponents.Count}", LogLevel.Debug);
-                for (int i = 0; i < menu.allClickableComponents.Count; i++)
-                {
-                    var c = menu.allClickableComponents[i];
-                    Monitor.Log($"  [{i}] id={c.myID} name='{c.name}' label='{c.label}' " +
-                        $"bounds=({c.bounds.X},{c.bounds.Y},{c.bounds.Width},{c.bounds.Height}) " +
-                        $"neighbors L={c.leftNeighborID} R={c.rightNeighborID} U={c.upNeighborID} D={c.downNeighborID} " +
-                        $"visible={c.visible} type={c.GetType().Name}", LogLevel.Debug);
-                }
-            }
-            else
-            {
-                Monitor.Log("allClickableComponents is NULL", LogLevel.Debug);
-            }
-
-            // Also dump any named component collections via reflection
-            var bundleFields = new[] { "bundles", "bundleButtons", "areaNextButton", "areaBackButton", "backButton" };
-            foreach (var fieldName in bundleFields)
-            {
-                var field = AccessTools.Field(typeof(JunimoNoteMenu), fieldName);
-                if (field == null) continue;
-                var val = field.GetValue(menu);
-                if (val is ClickableComponent cc)
-                {
-                    Monitor.Log($"  Field '{fieldName}': {FormatComponent(cc)}", LogLevel.Debug);
-                }
-                else if (val is System.Collections.IList list)
-                {
-                    Monitor.Log($"  Field '{fieldName}': list count={list.Count}", LogLevel.Debug);
-                    for (int i = 0; i < list.Count; i++)
-                    {
-                        if (list[i] is ClickableComponent item)
-                            Monitor.Log($"    [{i}] {FormatComponent(item)}", LogLevel.Debug);
-                    }
-                }
-                else if (val != null)
-                {
-                    Monitor.Log($"  Field '{fieldName}': {val.GetType().Name} = {val}", LogLevel.Debug);
-                }
-                else
-                {
-                    Monitor.Log($"  Field '{fieldName}': null", LogLevel.Debug);
-                }
-            }
-
-            Monitor.Log("========== END OVERVIEW DUMP ==========", LogLevel.Debug);
-        }
-
-        private static void DumpDonationPageComponents(JunimoNoteMenu menu)
-        {
-            Monitor.Log("========== JUNIMO NOTE DONATION PAGE: COMPONENT DUMP ==========", LogLevel.Debug);
-            Monitor.Log($"Menu position: ({menu.xPositionOnScreen},{menu.yPositionOnScreen}) size {menu.width}x{menu.height}", LogLevel.Debug);
-            Monitor.Log($"zoomLevel: {Game1.options.zoomLevel}", LogLevel.Debug);
-
-            var ingredientList = GetIngredientList(menu);
-            if (ingredientList != null)
-            {
-                Monitor.Log($"ingredientList count: {ingredientList.Count}", LogLevel.Debug);
-                for (int i = 0; i < ingredientList.Count; i++)
-                {
-                    var c = ingredientList[i];
-                    Monitor.Log($"  ingredientList[{i}] id={c.myID} name='{c.name}' label='{c.label}' " +
-                        $"bounds=({c.bounds.X},{c.bounds.Y},{c.bounds.Width},{c.bounds.Height}) " +
-                        $"neighbors L={c.leftNeighborID} R={c.rightNeighborID} U={c.upNeighborID} D={c.downNeighborID} " +
-                        $"hoverText='{c.hoverText}' type={c.GetType().Name}", LogLevel.Debug);
-                }
-            }
-            else
-            {
-                Monitor.Log("ingredientList is NULL", LogLevel.Debug);
-            }
-
-            var ingredientSlots = GetIngredientSlots(menu);
-            if (ingredientSlots != null)
-            {
-                Monitor.Log($"ingredientSlots count: {ingredientSlots.Count}", LogLevel.Debug);
-                for (int i = 0; i < ingredientSlots.Count; i++)
-                {
-                    var c = ingredientSlots[i];
-                    Monitor.Log($"  ingredientSlots[{i}] id={c.myID} name='{c.name}' label='{c.label}' " +
-                        $"bounds=({c.bounds.X},{c.bounds.Y},{c.bounds.Width},{c.bounds.Height}) " +
-                        $"neighbors L={c.leftNeighborID} R={c.rightNeighborID} U={c.upNeighborID} D={c.downNeighborID} " +
-                        $"hoverText='{c.hoverText}' type={c.GetType().Name}", LogLevel.Debug);
-                }
-            }
-            else
-            {
-                Monitor.Log("ingredientSlots is NULL", LogLevel.Debug);
-            }
-
-            // Dump first few inventory slots for position reference
-            if (menu.inventory?.inventory != null && menu.inventory.inventory.Count > 0)
-            {
-                var s0 = menu.inventory.inventory[0];
-                Monitor.Log($"inventory[0] bounds=({s0.bounds.X},{s0.bounds.Y},{s0.bounds.Width},{s0.bounds.Height})", LogLevel.Debug);
-                if (menu.inventory.inventory.Count > 5)
-                {
-                    var s5 = menu.inventory.inventory[5];
-                    Monitor.Log($"inventory[5] bounds=({s5.bounds.X},{s5.bounds.Y},{s5.bounds.Width},{s5.bounds.Height})", LogLevel.Debug);
-                }
-            }
-
-            // Back button on donation page
-            var backButton = AccessTools.Field(typeof(JunimoNoteMenu), "backButton")?.GetValue(menu) as ClickableComponent;
-            if (backButton != null)
-                Monitor.Log($"backButton: {FormatComponent(backButton)}", LogLevel.Debug);
-
-            // Purchase button
-            var purchaseButton = AccessTools.Field(typeof(JunimoNoteMenu), "purchaseButton")?.GetValue(menu) as ClickableComponent;
-            if (purchaseButton != null)
-                Monitor.Log($"purchaseButton: {FormatComponent(purchaseButton)}", LogLevel.Debug);
-
-            Monitor.Log("========== END DONATION PAGE DUMP ==========", LogLevel.Debug);
-        }
-
-        private static string FormatComponent(ClickableComponent c)
-        {
-            if (c == null) return "null";
-            return $"id={c.myID} name='{c.name}' label='{c.label}' " +
-                $"bounds=({c.bounds.X},{c.bounds.Y},{c.bounds.Width},{c.bounds.Height}) " +
-                $"neighbors L={c.leftNeighborID} R={c.rightNeighborID} U={c.upNeighborID} D={c.downNeighborID}";
-        }
-
         // ===== Reflection accessors =====
 
         private static bool GetSpecificBundlePage(JunimoNoteMenu menu)
         {
             try { return _specificBundlePageField != null && (bool)_specificBundlePageField.GetValue(menu); }
             catch { return false; }
-        }
-
-        private static Item GetHeldItem(JunimoNoteMenu menu)
-        {
-            try { return _heldItemField?.GetValue(menu) as Item; }
-            catch { return null; }
-        }
-
-        private static List<ClickableTextureComponent> GetIngredientSlots(JunimoNoteMenu menu)
-        {
-            try { return _ingredientSlotsField?.GetValue(menu) as List<ClickableTextureComponent>; }
-            catch { return null; }
         }
 
         private static List<ClickableTextureComponent> GetIngredientList(JunimoNoteMenu menu)
