@@ -623,14 +623,6 @@ namespace AndroidConsolizer.Patches
                     components.Add(cc);
             }
 
-            var backButtonField = AccessTools.Field(typeof(JunimoNoteMenu), "backButton");
-            var backButton = backButtonField?.GetValue(menu) as ClickableComponent;
-            if (backButton != null)
-            {
-                backButton.myID = 5100;
-                components.Add(backButton);
-            }
-
             var areaNext = AccessTools.Field(typeof(JunimoNoteMenu), "areaNextButton")?.GetValue(menu) as ClickableComponent;
             if (areaNext != null)
             {
